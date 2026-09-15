@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import service
+from html import escape
+
+from . import service, tradingview
 from .config import Config
 from .storage import WatchlistStore
+from .symbols import looks_like_ticker
 from .telegram import TelegramClient, TelegramError
 
 log = logging.getLogger(__name__)
 
-TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}(:[A-Z0-9.\-]{1,12})?$")
+# Komandasız yazılan açar sözlər: "nvidia izlə" / "izlə nvidia".
+WATCH_WORDS = {"izle", "izlə", "watch", "follow"}
+STOP_WORDS = {"dayan", "dayandir", "dayandır", "sil", "unwatch", "stop"}
+
+# Bir mesajda neçə simvol yoxlanılsın (hər biri xarici sorğu tələb edir).
+MAX_WATCH_ARGS = 10
 
 HELP = """<b>İnvestisiya botu</b>
 
@@ -30,9 +37,11 @@ Komandasız da olar — böyük hərflə və ya $ ilə: <code>AAPL MSFT</code>, 
 <code>/xulase</code> — izləmə siyahısının cədvəli + ən çox hərəkət edənlərin xəbərləri
 
 <b>İzləmə siyahısı</b>
-<code>/izle AAPL TSLA</code> — əlavə et
-<code>/sil TSLA</code> — çıxar
+<code>/izle NVDA</code> və ya <code>/izle nvidia</code> — əlavə et
+<code>/sil NVDA</code> — çıxar
 <code>/siyahi</code> — bax
+Komandasız da olar: <code>nvidia izlə</code>, <code>nvidia dayan</code>
+Şirkət adı da işləyir — bot özü ticker-i tapır və təsdiqləyir.
 
 <code>/id</code> — bu chat-ın ID-si (gündəlik xülasə üçün lazımdır)
 
@@ -94,17 +103,64 @@ class Bot:
         preview = command in ("/xeber", "/news")
         self.client.send_message(chat_id, reply, preview=preview)
 
-    def _watch(self, chat_id: int, tickers: list[str]) -> str:
-        if not tickers:
-            return "Nə əlavə edim? Məsələn: <code>/izle AAPL MSFT</code>"
-        current = self.store.add(chat_id, tickers)
-        return "Əlavə edildi.\n\n" + _watchlist_text(current)
+    def _watch(self, chat_id: int, queries: list[str]) -> str:
+        """Hər sorğunu təsdiqləyib siyahıya salır; tapılmayanı əlavə etmir."""
 
-    def _unwatch(self, chat_id: int, tickers: list[str]) -> str:
-        if not tickers:
+        if not queries:
+            return "Nə əlavə edim? Məsələn: <code>/izle NVDA</code> və ya <code>/izle nvidia</code>"
+
+        lines: list[str] = []
+        to_add: list[str] = []
+        for query in queries[:MAX_WATCH_ARGS]:
+            best, others = service.find_symbol(query)
+            if best is None:
+                lines.append(
+                    f"⚠️ <b>{escape(query)}</b> tapılmadı — əlavə edilmədi."
+                )
+                continue
+
+            # İstifadəçi birjanı özü yazıbsa, o formanı saxlayırıq.
+            stored = query if ":" in query else best.symbol
+            tradingview.remember_symbol(best.symbol, best.full)
+            to_add.append(stored)
+            lines.append(f"✅ {escape(best.label)}")
+
+            alternatives = [m for m in others if m.symbol != best.symbol][:2]
+            if alternatives:
+                alt = ", ".join(f"<code>/izle {escape(m.full)}</code>" for m in alternatives)
+                lines.append(f"   <i>Başqası idisə: {alt}</i>")
+
+        current = self.store.add(chat_id, to_add) if to_add else self.store.get(chat_id)
+        return "\n".join(lines) + "\n\n" + _watchlist_text(current)
+
+    def _unwatch(self, chat_id: int, queries: list[str]) -> str:
+        """Siyahıdan çıxarır; ad yazılıbsa əvvəlcə ticker-ə çevirir."""
+
+        if not queries:
             return "Nəyi çıxarım? Məsələn: <code>/sil TSLA</code>"
-        current = self.store.remove(chat_id, tickers)
-        return "Çıxarıldı.\n\n" + _watchlist_text(current)
+
+        current = self.store.get(chat_id)
+        lines: list[str] = []
+        to_remove: list[str] = []
+        for query in queries[:MAX_WATCH_ARGS]:
+            if query in current:
+                to_remove.append(query)
+                lines.append(f"🗑 <b>{escape(query)}</b> çıxarıldı.")
+                continue
+
+            best, _ = service.find_symbol(query)
+            if best and best.symbol in current:
+                to_remove.append(best.symbol)
+                lines.append(f"🗑 {escape(best.label)} çıxarıldı.")
+            elif best and best.full in current:
+                to_remove.append(best.full)
+                lines.append(f"🗑 {escape(best.label)} çıxarıldı.")
+            else:
+                lines.append(f"⚠️ <b>{escape(query)}</b> siyahıda yox idi.")
+
+        if to_remove:
+            current = self.store.remove(chat_id, to_remove)
+        return "\n".join(lines) + "\n\n" + _watchlist_text(current)
 
     # --- işləmə dövrü ---------------------------------------------------
 
@@ -168,9 +224,11 @@ class Bot:
 def _parse(text: str) -> tuple[str | None, list[str]]:
     """Mətni (komanda, arqumentlər) cütünə ayırır.
 
-    Komandasız mətndə yalnız açıq-aşkar simvollar — böyük hərflə yazılmış
-    (<code>AAPL</code>) və ya <code>$</code> ilə başlayanlar — qəbul edilir ki,
-    adi söhbət ticker kimi başa düşülməsin.
+    Üç forma qəbul edilir:
+      • <code>/izle nvidia</code> — adi komanda
+      • <code>nvidia izlə</code> / <code>izlə nvidia</code> — açar söz
+      • <code>AAPL MSFT</code> — yalnız açıq-aşkar simvollar (böyük hərf və ya $),
+        ki adi söhbət ticker kimi başa düşülməsin.
     """
 
     parts = text.split()
@@ -182,15 +240,34 @@ def _parse(text: str) -> tuple[str | None, list[str]]:
         command = head.split("@", 1)[0].lower()  # /s@BotAdi -> /s
         return command, [_clean(p) for p in parts[1:] if _clean(p)]
 
+    keyword = _keyword(parts[0])
+    if keyword and len(parts) > 1:  # "izlə nvidia"
+        return keyword, [_clean(p) for p in parts[1:] if _clean(p)]
+
+    keyword = _keyword(parts[-1])
+    if keyword and len(parts) > 1:  # "nvidia izlə"
+        return keyword, [_clean(p) for p in parts[:-1] if _clean(p)]
+
     tickers = []
     for part in parts:
         cashtag = part.startswith("$")
         token = _clean(part)
-        if not token or not TICKER_RE.match(token):
+        if not token or not looks_like_ticker(token):
             continue
         if cashtag or _clean(part) == part.strip(",.!?"):
             tickers.append(token)
     return None, tickers
+
+
+def _keyword(word: str) -> str | None:
+    """Açar sözü komandaya çevirir: `izlə` -> `/izle`, `dayan` -> `/sil`."""
+
+    word = word.strip(",.!?").lower()
+    if word in WATCH_WORDS:
+        return "/izle"
+    if word in STOP_WORDS:
+        return "/sil"
+    return None
 
 
 def _clean(token: str) -> str:

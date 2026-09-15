@@ -12,14 +12,28 @@ Telegram botu: sən simvolları yazırsan, bot **TradingView**-dan həmin səhml
 | `AAPL MSFT` | Komandasız da işləyir — böyük hərflə və ya `$tsla` şəklində |
 | `/xeber AAPL` | Yahoo Finance xəbərləri (başlıq, mənbə, neçə saat əvvəl, link) |
 | `/xulase` | İzləmə siyahısının cədvəli + ən çox hərəkət edən 3 kağızın xəbərləri |
-| `/izle AAPL TSLA` | İzləmə siyahısına əlavə |
-| `/sil TSLA` | İzləmə siyahısından çıxar |
+| `/izle NVDA` və ya `/izle nvidia` | İzləmə siyahısına əlavə (şirkət adı da olar) |
+| `nvidia izlə` | Eyni iş, komandasız |
+| `/sil NVDA`, `nvidia dayan` | İzləmə siyahısından çıxar |
 | `/siyahi` | İzləmə siyahısına bax |
 | `/id` | Bu chat-ın ID-si (gündəlik xülasə üçün lazımdır) |
 | `/help` | Kömək |
 
 Birja prefiksi də qəbul olunur: `NASDAQ:AAPL`, `BIST:THYAO`, `NYSE:BRK.B`.
 Prefiks yazmasan, bot TradingView-un simvol axtarışı ilə birjanı özü tapır.
+
+Siyahını **sən** formalaşdırırsan — bot özbaşına kağız seçmir. Yeganə istisna:
+`/xulase` siyahındakı kağızlardan günün ən çox hərəkət edən 3-ünü seçib
+xəbərlərini gətirir.
+
+`/izle` əlavə etməzdən əvvəl simvolu **yoxlayır**: tapılmasa siyahıya salmır,
+bir neçə uyğunluq olsa birincisini götürüb qalanlarını hazır komanda kimi
+təklif edir:
+
+```
+✅ NVDA — NVIDIA Corporation (NASDAQ)
+   Başqası idisə: /izle BMV:NVDA34
+```
 
 Nümunə cavab:
 
@@ -72,8 +86,9 @@ yaz → `DIGEST_TIME=07:30` (UTC; Bakı vaxtı ilə 11:30) → botu yenidən ba�
 
 - **TradingView scanner** (`scanner.tradingview.com/global/scan`) — qiymət,
   `change` (1 gün), `Perf.W` (1 həftə), `Perf.1M`, həcm, kapitallaşma.
-- **TradingView symbol search** — `AAPL` → `NASDAQ:AAPL` çevrilməsi (nəticə
-  yaddaşda saxlanılır).
+- **TradingView symbol search** — `nvidia` → `NASDAQ:NVDA` və `AAPL` →
+  `NASDAQ:AAPL` çevrilməsi (nəticə yaddaşda saxlanılır). Cavab verməsə,
+  Yahoo-nun axtarışı ilə eyni iş görülür.
 - **Yahoo Finance search** (`query1.finance.yahoo.com/v1/finance/search`) — xəbərlər.
 - **Yahoo Finance chart** (`.../v8/finance/chart/...`) — TradingView cavab
   vermədikdə ehtiyat qiymət mənbəyi; 1 həftə ≈ 5 ticarət günü kimi hesablanır.
@@ -91,6 +106,7 @@ stockbot/
   service.py      TradingView + Yahoo birləşməsi, ehtiyat mənbə məntiqi
   tradingview.py  scanner + symbol search klienti
   yahoo.py        xəbərlər və ehtiyat qiymət klienti
+  symbols.py      axtarış nəticələrinin modeli və sıralanması
   formatting.py   Telegram HTML mesajları
   telegram.py     Bot API long-polling klienti (yalnız requests)
   storage.py      chat-lara görə izləmə siyahısı (atomik JSON yazısı)

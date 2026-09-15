@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from .http import DEFAULT_TIMEOUT, SESSION
+from .symbols import SymbolMatch
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,49 @@ class TradingViewError(RuntimeError):
 _symbol_cache: dict[str, str] = {}
 
 
+def search_symbols(text: str, limit: int = 8) -> list[SymbolMatch]:
+    """Ad və ya ticker üzrə axtarış: `nvidia` -> NVDA, `AAPL` -> NASDAQ:AAPL."""
+
+    params = {
+        "text": text.strip(),
+        "hl": "false",
+        "lang": "en",
+        "domain": "production",
+    }
+    try:
+        response = SESSION.get(SEARCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        log.warning("TradingView axtarışı alınmadı (%s): %s", text, exc)
+        return []
+
+    if isinstance(payload, dict):  # API bəzən {"symbols": [...]} qaytarır
+        payload = payload.get("symbols", [])
+
+    matches: list[SymbolMatch] = []
+    for raw in payload[:limit]:
+        symbol = _strip_tags(raw.get("symbol", ""))
+        if not symbol:
+            continue
+        matches.append(
+            SymbolMatch(
+                symbol=symbol.upper(),
+                exchange=str(raw.get("exchange") or raw.get("prefix") or "").upper(),
+                description=_strip_tags(raw.get("description", "")),
+                kind=str(raw.get("type") or ""),
+                source="tradingview",
+            )
+        )
+    return matches
+
+
+def _strip_tags(value) -> str:
+    """Axtarış nəticəsi uyğun gələn hissəni <em> ilə işarələyir."""
+
+    return re.sub(r"<[^>]+>", "", str(value or "")).strip()
+
+
 def resolve_symbol(ticker: str) -> str:
     """`AAPL` -> `NASDAQ:AAPL`. Artıq tam formatda olan simvol toxunulmaz qalır."""
 
@@ -67,37 +112,22 @@ def resolve_symbol(ticker: str) -> str:
     if ticker in _symbol_cache:
         return _symbol_cache[ticker]
 
-    params = {
-        "text": ticker,
-        "hl": "false",
-        "lang": "en",
-        "type": "stock",
-        "domain": "production",
-    }
-    try:
-        response = SESSION.get(SEARCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
-        response.raise_for_status()
-        matches = response.json()
-    except Exception as exc:
-        log.warning("symbol search uğursuz oldu (%s): %s", ticker, exc)
-        matches = []
-
-    if isinstance(matches, dict):  # API bəzən {"symbols": [...]} qaytarır
-        matches = matches.get("symbols", [])
-
-    for match in matches:
-        symbol = str(match.get("symbol", "")).replace("<em>", "").replace("</em>", "")
-        exchange = match.get("exchange") or match.get("prefix") or ""
-        if symbol.upper() != ticker:
-            continue
-        resolved = f"{exchange}:{symbol}".upper() if exchange else symbol.upper()
-        _symbol_cache[ticker] = resolved
-        return resolved
+    for match in search_symbols(ticker):
+        if match.symbol.upper() == ticker:
+            resolved = match.full.upper()
+            _symbol_cache[ticker] = resolved
+            return resolved
 
     # Tapılmadısa ən çox yayılmış birjanı sınayırıq; scan yenə boş qaytara bilər.
     fallback = f"NASDAQ:{ticker}"
     _symbol_cache[ticker] = fallback
     return fallback
+
+
+def remember_symbol(ticker: str, full_symbol: str) -> None:
+    """Ad axtarışından gələn nəticəni yaddaşa yazır ki, təkrar sorğu getməsin."""
+
+    _symbol_cache[ticker.strip().upper()] = full_symbol.strip().upper()
 
 
 def _cell(row: list, index: int) -> float | str | None:

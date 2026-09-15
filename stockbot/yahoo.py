@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .http import DEFAULT_TIMEOUT, SESSION
+from .symbols import SymbolMatch
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,35 @@ class Snapshot:
     currency: str | None
     change_1d: float | None
     change_1w: float | None
+
+
+def search_symbols(text: str, limit: int = 8) -> list[SymbolMatch]:
+    """TradingView axtarışı cavab verməyəndə ehtiyat ad/ticker axtarışı."""
+
+    params = {"q": text.strip(), "quotesCount": limit, "newsCount": 0}
+    try:
+        response = SESSION.get(SEARCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        quotes = response.json().get("quotes", [])
+    except Exception as exc:
+        log.warning("Yahoo axtarışı alınmadı (%s): %s", text, exc)
+        return []
+
+    matches: list[SymbolMatch] = []
+    for raw in quotes[:limit]:
+        symbol = str(raw.get("symbol", "")).strip()
+        if not symbol:
+            continue
+        matches.append(
+            SymbolMatch(
+                symbol=symbol.upper(),
+                exchange=str(raw.get("exchDisp") or raw.get("exchange") or "").upper(),
+                description=str(raw.get("longname") or raw.get("shortname") or "").strip(),
+                kind=str(raw.get("quoteType") or "").lower(),
+                source="yahoo",
+            )
+        )
+    return matches
 
 
 def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:

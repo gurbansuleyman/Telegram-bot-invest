@@ -3,57 +3,150 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
-from . import formatting, yahoo
+from . import formatting, tradingview, yahoo
+from .symbols import SymbolMatch, looks_like_ticker, rank
 from .tradingview import Quote, TradingViewError, get_quotes
-from .yahoo import NewsItem
+from .yahoo import NewsItem, Snapshot
 
 log = logging.getLogger(__name__)
 
 MAX_TICKERS = 15
 
 
-def collect_quotes(tickers: list[str]) -> tuple[dict[str, Quote], dict[str, yahoo.Snapshot], list[str]]:
-    """TradingView-dan gətirir; alınmayanları Yahoo ilə tamamlayır.
+@dataclass
+class Entry:
+    """Bir sorğunun nəticəsi: istifadəçinin yazdığı mətn + tapılan məlumat."""
 
-    Qaytarır: (tradingview nəticələri, yahoo ehtiyat nəticələri, heç bir yerdə tapılmayanlar)
+    query: str
+    ticker: str
+    quote: Quote | None = None
+    snapshot: Snapshot | None = None
+
+    @property
+    def found(self) -> bool:
+        return self.quote is not None or self.snapshot is not None
+
+
+def resolve_query(query: str, limit: int = 6) -> list[SymbolMatch]:
+    """Ad və ya ticker üzrə uyğunluqlar — ən yaxşısı birinci.
+
+    Əvvəl TradingView axtarışı, o cavab verməsə Yahoo axtarışı işləyir.
     """
 
-    tickers = [t.upper() for t in tickers][:MAX_TICKERS]
+    query = query.strip()
+    if not query:
+        return []
+
+    matches = tradingview.search_symbols(query, limit)
+    if not matches:
+        matches = yahoo.search_symbols(query, limit)
+    return rank(matches, query)[:limit]
+
+
+def find_symbol(query: str) -> tuple[SymbolMatch | None, list[SymbolMatch]]:
+    """İzləmə siyahısına salmazdan əvvəl simvolu təsdiqləyir.
+
+    Qaytarır: (ən uyğun nəticə və ya None, digər ehtimallar).
+    """
+
+    query = query.strip().upper()
+    if not query:
+        return None, []
+
+    if ":" in query:  # İstifadəçi birjanı özü yazıb — birbaşa yoxlayırıq.
+        try:
+            found = get_quotes([query])
+        except TradingViewError:
+            found = {}
+        quote = found.get(query)
+        if not quote:
+            return None, []
+        exchange, _, symbol = query.partition(":")
+        return (
+            SymbolMatch(
+                symbol=symbol,
+                exchange=exchange,
+                description=quote.display,
+                kind="stock",
+                source="tradingview",
+            ),
+            [],
+        )
+
+    matches = resolve_query(query, limit=4)
+    if not matches:
+        return None, []
+    return matches[0], matches[1:]
+
+
+def collect(queries: list[str]) -> tuple[list[Entry], list[str]]:
+    """Sorğuları qiymət məlumatına çevirir; tapılmayanları ayrıca qaytarır."""
+
+    queries = [q.strip().upper() for q in queries if q.strip()][:MAX_TICKERS]
+    if not queries:
+        return [], []
+
+    direct = [q for q in queries if looks_like_ticker(q)]
     try:
-        quotes = get_quotes(tickers)
+        quotes = get_quotes(direct) if direct else {}
     except TradingViewError as exc:
         log.warning("TradingView əlçatmazdır, Yahoo-ya keçilir: %s", exc)
         quotes = {}
 
-    fallbacks: dict[str, yahoo.Snapshot] = {}
+    entries: list[Entry] = []
     missing: list[str] = []
-    for ticker in tickers:
-        if ticker in quotes:
+    for query in queries:
+        entry = Entry(query=query, ticker=query, quote=quotes.get(query))
+        if entry.found:
+            entries.append(entry)
             continue
-        snapshot = yahoo.get_snapshot(ticker)
-        if snapshot and snapshot.price is not None:
-            fallbacks[ticker] = snapshot
+
+        resolved = _resolve_one(query)
+        if resolved.found:
+            entries.append(resolved)
         else:
-            missing.append(ticker)
+            missing.append(query)
 
-    return quotes, fallbacks, missing
+    return entries, missing
 
 
-def quotes_report(tickers: list[str]) -> str:
-    """`/s AAPL MSFT` üçün mətn: hər simvolun 1 günlük və 1 həftəlik vəziyyəti."""
+def _resolve_one(query: str) -> Entry:
+    """Tək sorğu üçün bütün yolları sınayır: ad axtarışı, sonra Yahoo qiyməti."""
 
-    if not tickers:
+    # 1) Ad və ya tanınmayan ticker — axtarışla dəqiq simvolu tapırıq.
+    for match in resolve_query(query, limit=3):
+        try:
+            found = get_quotes([match.full])
+        except TradingViewError:
+            found = {}
+        if match.full in found:
+            tradingview.remember_symbol(match.symbol, match.full)
+            return Entry(query=query, ticker=match.symbol, quote=found[match.full])
+
+    # 2) TradingView susursa, Yahoo-nun öz qiymətinə keçirik.
+    snapshot = yahoo.get_snapshot(query)
+    if snapshot and snapshot.price is not None:
+        return Entry(query=query, ticker=query, snapshot=snapshot)
+
+    return Entry(query=query, ticker=query)
+
+
+def quotes_report(queries: list[str]) -> str:
+    """`/s AAPL nvidia` üçün mətn: hər simvolun 1 günlük və 1 həftəlik vəziyyəti."""
+
+    if not queries:
         return "Simvol yazmalısan. Məsələn: <code>/s AAPL MSFT NVDA</code>"
 
-    quotes, fallbacks, missing = collect_quotes(tickers)
+    entries, missing = collect(queries)
 
     blocks: list[str] = []
-    for ticker in [t.upper() for t in tickers][:MAX_TICKERS]:
-        if ticker in quotes:
-            blocks.append(formatting.format_quote(ticker, quotes[ticker]))
-        elif ticker in fallbacks:
-            blocks.append(formatting.format_snapshot(ticker, fallbacks[ticker]))
+    for entry in entries:
+        if entry.quote:
+            blocks.append(formatting.format_quote(entry.ticker, entry.quote))
+        elif entry.snapshot:
+            blocks.append(formatting.format_snapshot(entry.ticker, entry.snapshot))
 
     if missing:
         blocks.append(f"<i>Tapılmadı: {', '.join(missing)}</i>")
@@ -61,14 +154,18 @@ def quotes_report(tickers: list[str]) -> str:
     return "\n\n".join(blocks) if blocks else "Heç bir simvol üzrə məlumat alınmadı."
 
 
-def news_report(tickers: list[str], limit: int) -> str:
-    if not tickers:
+def news_report(queries: list[str], limit: int) -> str:
+    if not queries:
         return "Simvol yazmalısan. Məsələn: <code>/xeber AAPL</code>"
 
-    blocks = [
-        formatting.format_news(ticker.upper(), yahoo.get_news(ticker, limit))
-        for ticker in tickers[:MAX_TICKERS]
-    ]
+    blocks = []
+    for query in queries[:MAX_TICKERS]:
+        ticker = query.upper()
+        if not looks_like_ticker(ticker):
+            matches = resolve_query(query, limit=1)
+            if matches:
+                ticker = matches[0].symbol
+        blocks.append(formatting.format_news(ticker, yahoo.get_news(ticker, limit)))
     return "\n\n".join(blocks)
 
 
@@ -76,30 +173,16 @@ def digest_report(tickers: list[str], news_limit: int, movers: int = 3) -> str:
     """İzləmə siyahısının xülasəsi + ən çox hərəkət edən kağızların xəbərləri."""
 
     if not tickers:
-        return (
-            "İzləmə siyahın boşdur. <code>/izle AAPL MSFT</code> ilə simvol əlavə et."
-        )
+        return "İzləmə siyahın boşdur. <code>/izle AAPL MSFT</code> ilə simvol əlavə et."
 
-    quotes, fallbacks, missing = collect_quotes(tickers)
+    entries, missing = collect(tickers)
 
-    # Yahoo ehtiyat nəticələrini eyni cədvələ salırıq.
-    merged: dict[str, Quote] = dict(quotes)
-    for ticker, snapshot in fallbacks.items():
-        merged[ticker] = Quote(
-            symbol=snapshot.symbol,
-            name=snapshot.symbol,
-            description=snapshot.name,
-            price=snapshot.price,
-            currency=snapshot.currency,
-            change_1d=snapshot.change_1d,
-            change_1d_abs=None,
-            change_1w=snapshot.change_1w,
-            change_1m=None,
-            change_ytd=None,
-            volume=None,
-            market_cap=None,
-            exchange="Yahoo",
-        )
+    merged: dict[str, Quote] = {}
+    for entry in entries:
+        if entry.quote:
+            merged[entry.ticker] = entry.quote
+        elif entry.snapshot:
+            merged[entry.ticker] = _as_quote(entry.snapshot)
 
     top = _top_movers(merged, movers)
     news_by_ticker: dict[str, list[NewsItem]] = {
@@ -107,6 +190,26 @@ def digest_report(tickers: list[str], news_limit: int, movers: int = 3) -> str:
     }
 
     return formatting.format_digest(merged, missing, news_by_ticker)
+
+
+def _as_quote(snapshot: Snapshot) -> Quote:
+    """Yahoo nəticəsini eyni cədvəldə göstərmək üçün Quote formasına salır."""
+
+    return Quote(
+        symbol=snapshot.symbol,
+        name=snapshot.symbol,
+        description=snapshot.name,
+        price=snapshot.price,
+        currency=snapshot.currency,
+        change_1d=snapshot.change_1d,
+        change_1d_abs=None,
+        change_1w=snapshot.change_1w,
+        change_1m=None,
+        change_ytd=None,
+        volume=None,
+        market_cap=None,
+        exchange="Yahoo",
+    )
 
 
 def _top_movers(quotes: dict[str, Quote], count: int) -> list[str]:

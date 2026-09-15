@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stockbot import formatting  # noqa: E402
 from stockbot.bot import _parse, _seconds_until  # noqa: E402
+from stockbot.symbols import SymbolMatch, looks_like_ticker, rank  # noqa: E402
 from stockbot.config import Config  # noqa: E402
 from stockbot.storage import WatchlistStore  # noqa: E402
 from stockbot.telegram import _split_message  # noqa: E402
@@ -26,6 +27,37 @@ def test_parse_command():
     # Adi söhbət ticker sayılmır.
     assert _parse("salam necəsən") == (None, [])
     assert _parse("bu gün nə var") == (None, [])
+
+
+def test_parse_keywords():
+    # Açar söz həm əvvəldə, həm sonda işləyir; ad da qəbul olunur.
+    assert _parse("nvidia izlə") == ("/izle", ["NVIDIA"])
+    assert _parse("izle nvidia") == ("/izle", ["NVIDIA"])
+    assert _parse("NVDA dayan") == ("/sil", ["NVDA"])
+    assert _parse("tesla stop") == ("/sil", ["TESLA"])
+    # Tək açar söz komanda deyil.
+    assert _parse("izlə") == (None, [])
+
+
+def test_rank_prefers_exact_symbol_on_major_exchange():
+    matches = [
+        SymbolMatch("NVDA34", "BMV", "NVIDIA Corporation", "dr", "tradingview"),
+        SymbolMatch("NVDA", "NASDAQ", "NVIDIA Corporation", "stock", "tradingview"),
+        SymbolMatch("NVDA", "NASDAQ", "NVIDIA Corporation", "stock", "yahoo"),
+    ]
+    ranked = rank(matches, "NVIDIA")
+    assert ranked[0].symbol == "NVDA"
+    assert ranked[0].exchange == "NASDAQ"
+    assert len(ranked) == 2  # eyni simvol iki dəfə sayılmır
+    assert ranked[0].full == "NASDAQ:NVDA"
+
+
+def test_looks_like_ticker():
+    assert looks_like_ticker("AAPL")
+    assert looks_like_ticker("BRK.B")
+    assert looks_like_ticker("NASDAQ:AAPL")
+    assert not looks_like_ticker("nvidia corporation")
+    assert not looks_like_ticker("VERYLONGNAME")
 
 
 def test_percent_and_marker():
