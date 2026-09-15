@@ -1,0 +1,214 @@
+"""Komanda marşrutlaşdırması və gündəlik xülasə planlayıcısı."""
+
+from __future__ import annotations
+
+import logging
+import re
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+
+from . import service
+from .config import Config
+from .storage import WatchlistStore
+from .telegram import TelegramClient, TelegramError
+
+log = logging.getLogger(__name__)
+
+TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,9}(:[A-Z0-9.\-]{1,12})?$")
+
+HELP = """<b>İnvestisiya botu</b>
+
+<b>Qiymət (TradingView)</b>
+<code>/s AAPL MSFT NVDA</code> — 1 günlük və 1 həftəlik vəziyyət
+Komandasız da olar — böyük hərflə və ya $ ilə: <code>AAPL MSFT</code>, <code>$tsla</code>
+
+<b>Xəbərlər (Yahoo Finance)</b>
+<code>/xeber AAPL</code> — həmin kağız üzrə son xəbərlər
+
+<b>Xülasə</b>
+<code>/xulase</code> — izləmə siyahısının cədvəli + ən çox hərəkət edənlərin xəbərləri
+
+<b>İzləmə siyahısı</b>
+<code>/izle AAPL TSLA</code> — əlavə et
+<code>/sil TSLA</code> — çıxar
+<code>/siyahi</code> — bax
+
+<code>/id</code> — bu chat-ın ID-si (gündəlik xülasə üçün lazımdır)
+
+Birja prefiksi də işləyir: <code>BIST:THYAO</code>, <code>NASDAQ:AAPL</code>."""
+
+
+class Bot:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.client = TelegramClient(config.token)
+        self.store = WatchlistStore(config.state_path, config.default_watchlist)
+        self._stop = threading.Event()
+
+    # --- komandalar -----------------------------------------------------
+
+    def handle_message(self, message: dict) -> None:
+        chat_id = message["chat"]["id"]
+        text = (message.get("text") or "").strip()
+        if not text:
+            return
+
+        if not self.config.is_allowed(chat_id):
+            log.info("icazəsiz chat rədd edildi: %s", chat_id)
+            return
+
+        command, args = _parse(text)
+        log.info("chat=%s komanda=%s args=%s", chat_id, command, args)
+
+        self.client.send_chat_action(chat_id)
+
+        if command in ("/start", "/help", "/komek"):
+            reply = HELP
+        elif command == "/id":
+            reply = f"Bu chat-ın ID-si: <code>{chat_id}</code>"
+        elif command in ("/s", "/stock", "/qiymet"):
+            reply = service.quotes_report(args or self.store.get(chat_id))
+        elif command in ("/xeber", "/news"):
+            reply = service.news_report(
+                args or self.store.get(chat_id)[:3], self.config.news_per_symbol
+            )
+        elif command in ("/xulase", "/digest"):
+            reply = service.digest_report(
+                self.store.get(chat_id), self.config.news_per_symbol
+            )
+        elif command in ("/izle", "/watch"):
+            reply = self._watch(chat_id, args)
+        elif command in ("/sil", "/unwatch"):
+            reply = self._unwatch(chat_id, args)
+        elif command in ("/siyahi", "/list"):
+            reply = _watchlist_text(self.store.get(chat_id))
+        elif command is None:
+            if not args:
+                # Adi söhbətə qarışmırıq (xüsusilə qruplarda).
+                return
+            reply = service.quotes_report(args)
+        else:
+            reply = "Bu komandanı tanımıram. <code>/help</code> yaz."
+
+        preview = command in ("/xeber", "/news")
+        self.client.send_message(chat_id, reply, preview=preview)
+
+    def _watch(self, chat_id: int, tickers: list[str]) -> str:
+        if not tickers:
+            return "Nə əlavə edim? Məsələn: <code>/izle AAPL MSFT</code>"
+        current = self.store.add(chat_id, tickers)
+        return "Əlavə edildi.\n\n" + _watchlist_text(current)
+
+    def _unwatch(self, chat_id: int, tickers: list[str]) -> str:
+        if not tickers:
+            return "Nəyi çıxarım? Məsələn: <code>/sil TSLA</code>"
+        current = self.store.remove(chat_id, tickers)
+        return "Çıxarıldı.\n\n" + _watchlist_text(current)
+
+    # --- işləmə dövrü ---------------------------------------------------
+
+    def run(self) -> None:
+        me = self.client.get_me()
+        log.info("bot işə düşdü: @%s", me.get("username"))
+
+        if self.config.digest_enabled:
+            threading.Thread(target=self._digest_loop, daemon=True).start()
+            log.info(
+                "gündəlik xülasə aktivdir: chat=%s saat=%s UTC",
+                self.config.digest_chat_id,
+                self.config.digest_time,
+            )
+
+        while not self._stop.is_set():
+            try:
+                for update in self.client.poll():
+                    message = update.get("message")
+                    if message:
+                        try:
+                            self.handle_message(message)
+                        except Exception:
+                            log.exception("mesaj emal edilmədi")
+                            self._notify_failure(message)
+            except TelegramError as exc:
+                log.warning("Telegram xətası: %s", exc)
+                time.sleep(5)
+            except Exception:
+                log.exception("gözlənilməz xəta")
+                time.sleep(5)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _notify_failure(self, message: dict) -> None:
+        try:
+            self.client.send_message(
+                message["chat"]["id"], "Xəta baş verdi, bir azdan yenidən yoxla."
+            )
+        except TelegramError:
+            log.debug("xəta bildirişi göndərilmədi")
+
+    def _digest_loop(self) -> None:
+        while not self._stop.is_set():
+            wait = _seconds_until(self.config.digest_time)
+            if self._stop.wait(wait):
+                return
+            try:
+                chat_id = self.config.digest_chat_id
+                report = service.digest_report(
+                    self.store.get(chat_id), self.config.news_per_symbol
+                )
+                self.client.send_message(chat_id, report)
+            except Exception:
+                log.exception("gündəlik xülasə göndərilmədi")
+            # Eyni dəqiqədə ikinci dəfə işə düşməsin.
+            self._stop.wait(60)
+
+
+def _parse(text: str) -> tuple[str | None, list[str]]:
+    """Mətni (komanda, arqumentlər) cütünə ayırır.
+
+    Komandasız mətndə yalnız açıq-aşkar simvollar — böyük hərflə yazılmış
+    (<code>AAPL</code>) və ya <code>$</code> ilə başlayanlar — qəbul edilir ki,
+    adi söhbət ticker kimi başa düşülməsin.
+    """
+
+    parts = text.split()
+    if not parts:
+        return None, []
+
+    head = parts[0]
+    if head.startswith("/"):
+        command = head.split("@", 1)[0].lower()  # /s@BotAdi -> /s
+        return command, [_clean(p) for p in parts[1:] if _clean(p)]
+
+    tickers = []
+    for part in parts:
+        cashtag = part.startswith("$")
+        token = _clean(part)
+        if not token or not TICKER_RE.match(token):
+            continue
+        if cashtag or _clean(part) == part.strip(",.!?"):
+            tickers.append(token)
+    return None, tickers
+
+
+def _clean(token: str) -> str:
+    return token.lstrip("$").strip(",.!?").upper()
+
+
+def _watchlist_text(tickers: list[str]) -> str:
+    if not tickers:
+        return "İzləmə siyahın boşdur. <code>/izle AAPL</code> ilə əlavə et."
+    return "👁 <b>İzləmə siyahısı</b>\n" + ", ".join(f"<code>{t}</code>" for t in tickers)
+
+
+def _seconds_until(hhmm: str) -> float:
+    """Növbəti HH:MM (UTC) anına qədər saniyə."""
+
+    hour, minute = (int(part) for part in hhmm.split(":"))
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
