@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from html import escape
 
-from . import formatting, news, tradingview, yahoo
+from . import chart, formatting, history, news, tradingview, yahoo
 from .symbols import SymbolMatch, looks_like_ticker, rank
 from .tradingview import Quote, TradingViewError, get_quotes
 from .news import NewsItem
@@ -132,6 +133,36 @@ def _resolve_one(query: str) -> Entry:
         return Entry(query=query, ticker=query, snapshot=snapshot)
 
     return Entry(query=query, ticker=query)
+
+
+def quote_card(query: str, exchange: str | None = None) -> tuple[str, bytes | None]:
+    """Bir simvolun qiymət mətni və 30 günlük qrafiki.
+
+    Qrafik tarixçə tapılmasa və ya matplotlib yoxdursa `None` olur —
+    o halda yalnız mətn göndərilir.
+    """
+
+    entries, _ = collect([query])
+    if not entries:
+        return f"<i>Tapılmadı: {escape(query)}</i>", None
+
+    entry = entries[0]
+    if entry.quote:
+        text = formatting.format_quote(entry.ticker, entry.quote)
+        name = entry.quote.display
+        change = entry.quote.change_1d
+        currency = entry.quote.currency
+        exchange = exchange or entry.quote.exchange
+    else:
+        snapshot = entry.snapshot
+        text = formatting.format_snapshot(entry.ticker, snapshot)
+        name = snapshot.name
+        change = snapshot.change_1d
+        currency = snapshot.currency
+
+    candles = history.daily_closes(entry.ticker, exchange)
+    price = entry.quote.price if entry.quote else entry.snapshot.price
+    return text, chart.render(entry.ticker, name, candles, change, currency, price)
 
 
 def quotes_report(queries: list[str]) -> str:

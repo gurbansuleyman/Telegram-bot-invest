@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 API_URL = "https://api.telegram.org/bot{token}/{method}"
 MAX_MESSAGE_LEN = 4096
+MAX_CAPTION_LEN = 1024  # Telegram şəkil altyazısı limiti
 
 
 class TelegramError(RuntimeError):
@@ -85,6 +86,32 @@ class TelegramClient:
                     "parse_mode": "HTML",
                     "disable_web_page_preview": not preview,
                 },
+            )
+
+    def send_photo(self, chat_id: int, photo: bytes, caption: str = "") -> None:
+        """PNG-ni multipart kimi yükləyir (şəkil üçün JSON yaramır)."""
+
+        url = API_URL.format(token=self._token, method="sendPhoto")
+        data = {"chat_id": str(chat_id), "parse_mode": "HTML"}
+        if caption:
+            data["caption"] = caption[:MAX_CAPTION_LEN]
+
+        try:
+            response = SESSION.post(
+                url,
+                data=data,
+                files={"photo": ("chart.png", photo, "image/png")},
+                timeout=60,
+            )
+            body = response.json()
+        except Exception as exc:
+            raise TelegramError(
+                self._redact(f"sendPhoto sorğusu alınmadı: {exc}"), kind="network"
+            ) from exc
+
+        if not body.get("ok"):
+            raise TelegramError(
+                self._redact(f"sendPhoto xətası: {body.get('description')}")
             )
 
     def send_chat_action(self, chat_id: int, action: str = "typing") -> None:

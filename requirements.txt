@@ -1,1 +1,4 @@
 requests>=2.31.0
+
+# Qrafiklər üçün. Quraşdırılmasa bot işləyir, sadəcə şəkil yerinə mətn göndərir.
+matplotlib>=3.5

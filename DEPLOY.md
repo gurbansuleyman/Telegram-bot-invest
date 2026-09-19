@@ -192,6 +192,7 @@ systemctl restart invest-bot
 | Bot cavab vermir, log təmizdir | `ALLOWED_CHAT_IDS`-də sənin ID-n yoxdur |
 | `Tapılmadı: XXX` | Simvol səhvdir, ya da TradingView/Yahoo müvəqqəti cavab vermir |
 | `son 3 gündə yeni xəbər yoxdur` | Normaldır — filtr işləyir. Pəncərəni `NEWS_MAX_AGE_DAYS` ilə dəyiş |
+| Qrafik gəlmir, yalnız mətn | `pip install -r requirements.txt` (matplotlib), ya da Stooq həmin simvolu tanımır |
 | Gündəlik xülasə gəlmir | `DIGEST_TIME` **UTC**-dir; `DIGEST_CHAT_ID` boş ola bilməz |
 | Bot söndü, mesajlar itdi? | İtmir — Telegram ~24 saat saxlayır, bot qalxanda cavab verir |
 

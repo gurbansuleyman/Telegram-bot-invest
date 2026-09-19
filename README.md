@@ -9,6 +9,7 @@ Telegram botu: sən simvolları yazırsan, bot **TradingView**-dan həmin səhml
 | Komanda | İş |
 | --- | --- |
 | `/s AAPL MSFT NVDA` | Qiymət, 1 günlük və 1 həftəlik dəyişim (TradingView) |
+| `/s NVDA` | Tək simvol yazsan, 30 günlük qrafik şəkli də gəlir |
 | `AAPL MSFT` | Komandasız da işləyir — böyük hərflə və ya `$tsla` şəklində |
 | `/xeber AAPL` | Yahoo Finance xəbərləri (başlıq, mənbə, neçə saat əvvəl, link) |
 | `/xulase` | İzləmə siyahısının cədvəli + ən çox hərəkət edən 3 kağızın xəbərləri |
@@ -34,6 +35,10 @@ təklif edir:
 ✅ NVDA — NVIDIA Corporation (NASDAQ)
    Başqası idisə: /izle BMV:NVDA34
 ```
+
+`/izle` və tək simvollu `/s` cavabı 30 günlük qiymət qrafiki (PNG) ilə gəlir —
+tarixçə Stooq-dan, qrafik matplotlib ilə çəkilir. matplotlib quraşdırılmasa və ya
+tarixçə tapılmasa (məsələn ABŞ-dan kənar bəzi birjalar), bot yalnız mətn göndərir.
 
 Nümunə cavab:
 
@@ -93,6 +98,8 @@ yaz → `DIGEST_TIME=07:30` (UTC; Bakı vaxtı ilə 11:30) → botu yenidən ba�
 - **Yahoo Finance search** (`query1.finance.yahoo.com/v1/finance/search`) — xəbərlər.
 - **Yahoo Finance chart** (`.../v8/finance/chart/...`) — TradingView cavab
   vermədikdə ehtiyat qiymət mənbəyi; 1 həftə ≈ 5 ticarət günü kimi hesablanır.
+- **Google News RSS** — Yahoo bağlı olanda xəbərlər buradan gəlir.
+- **Stooq** (`stooq.com/q/d/l/`) — qrafik üçün günlük bağlanış qiymətləri.
 
 Hər iki xidmət rəsmi/açıq API deyil, sənədləşdirilməmiş endpoint-lərdir:
 sorğular təkrar cəhdlə (retry) göndərilir, biri cavab verməsə bot digərinə keçir,
@@ -108,6 +115,9 @@ stockbot/
   tradingview.py  scanner + symbol search klienti
   yahoo.py        xəbərlər və ehtiyat qiymət klienti
   symbols.py      axtarış nəticələrinin modeli və sıralanması
+  history.py      günlük qiymət tarixçəsi (Stooq CSV)
+  chart.py        30 günlük qrafikin PNG-ə çevrilməsi
+  news.py         xəbər mənbələri və onların ardıcıllığı
   formatting.py   Telegram HTML mesajları
   telegram.py     Bot API long-polling klienti (yalnız requests)
   storage.py      chat-lara görə izləmə siyahısı (atomik JSON yazısı)

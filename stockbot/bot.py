@@ -77,7 +77,11 @@ class Bot:
         elif command == "/id":
             reply = f"Bu chat-ın ID-si: <code>{chat_id}</code>"
         elif command in ("/s", "/stock", "/qiymet"):
-            reply = service.quotes_report(args or self.store.get(chat_id))
+            targets = args or self.store.get(chat_id)
+            if len(targets) == 1:
+                self._send_quote(chat_id, targets[0])
+                return
+            reply = service.quotes_report(targets)
         elif command in ("/xeber", "/news"):
             reply = service.news_report(
                 args or self.store.get(chat_id)[:3],
@@ -115,6 +119,7 @@ class Bot:
 
         lines: list[str] = []
         to_add: list[str] = []
+        added_matches: list[tuple[str, object]] = []
         for query in queries[:MAX_WATCH_ARGS]:
             best, others = service.find_symbol(query)
             if best is None:
@@ -127,6 +132,7 @@ class Bot:
             stored = query if ":" in query else best.symbol
             tradingview.remember_symbol(best.symbol, best.full)
             to_add.append(stored)
+            added_matches.append((stored, best))
             lines.append(f"✅ {escape(best.label)}")
 
             alternatives = [m for m in others if m.symbol != best.symbol][:2]
@@ -138,16 +144,20 @@ class Bot:
             return "\n".join(lines) + "\n\n" + _watchlist_text(self.store.get(chat_id))
 
         current = self.store.add(chat_id, to_add)
-        # Əlavə edən kimi cari vəziyyəti göstəririk — ayrıca /s yazmağa ehtiyac qalmasın.
-        return "\n".join(
-            [
-                "\n".join(lines),
-                "",
-                service.quotes_report(to_add),
-                "",
-                _watchlist_text(current),
-            ]
-        )
+        self.client.send_message(chat_id, "\n".join(lines))
+        # Əlavə edən kimi cari vəziyyət — ayrıca /s yazmağa ehtiyac qalmasın.
+        for ticker, match in added_matches:
+            self._send_quote(chat_id, ticker, match.exchange)
+        return _watchlist_text(current)
+
+    def _send_quote(self, chat_id: int, ticker: str, exchange: str | None = None) -> None:
+        """Qiyməti qrafiklə göndərir; qrafik alınmasa yalnız mətn gedir."""
+
+        text, png = service.quote_card(ticker, exchange)
+        if png:
+            self.client.send_photo(chat_id, png, caption=text)
+        else:
+            self.client.send_message(chat_id, text)
 
     def _unwatch(self, chat_id: int, queries: list[str]) -> str:
         """Siyahıdan çıxarır; ad yazılıbsa əvvəlcə ticker-ə çevirir."""
