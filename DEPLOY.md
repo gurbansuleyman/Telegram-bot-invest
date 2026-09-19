@@ -67,7 +67,45 @@ DIGEST_TIME=07:30              # UTC! Bakı vaxtı 11:30 üçün 07:30
 
 ---
 
-## Addım 3 — 24/7 üçün VPS (Hetzner)
+## Addım 3a — Mac-də 24/7 (pulsuz, launchd)
+
+Mac açıq olduğu müddətdə bot işləsin: kompüter açılanda özü qalxsın, çöksə
+özü yenidən başlasın, terminal bağlı olsun.
+
+```bash
+./deploy/install-macos.sh
+```
+
+Skript `.venv` və `.env`-i yoxlayır, `~/Library/LaunchAgents`-ə xidmət faylı
+yazır və işə salır. Bir neçə saniyədən sonra:
+
+```bash
+tail -f ~/Library/Logs/investbot.log      # 'bot işə düşdü: @...' görünməlidir
+```
+
+Gündəlik idarəetmə:
+
+| Əməliyyat | Komanda |
+| --- | --- |
+| Vəziyyət | `launchctl print gui/$(id -u)/com.gurbansuleyman.investbot \| head -20` |
+| Loglar | `tail -f ~/Library/Logs/investbot.log` |
+| Yenidən başlat | `launchctl kickstart -k gui/$(id -u)/com.gurbansuleyman.investbot` |
+| Dayandır | `launchctl bootout gui/$(id -u)/com.gurbansuleyman.investbot` |
+| Tamam sil | `./deploy/install-macos.sh --uninstall` |
+
+Kodu yenilədikdən sonra (`git pull`) xidməti `kickstart -k` ilə yenidən başlat.
+
+**Yuxu rejimi.** Xidmət `caffeinate -s -i` ilə işləyir: adaptere qoşulu olanda
+Mac boşdayanma səbəbindən yuxuya getmir. Amma **qapağı bağlayanda macOS yenə
+yatır** — bunu caffeinate dəyişmir. Qapaq bağlı işləsin istəyirsənsə, ya xarici
+monitor qoş (clamshell), ya da növbəti addımdakı serverə keç.
+
+Bot yatanda gələn mesajlar itmir — Telegram ~24 saat saxlayır və bot oyananda
+hamısına cavab verir.
+
+---
+
+## Addım 3b — 24/7 üçün VPS (Hetzner)
 
 Lokalda işlədisə, serverə keçiririk.
 
