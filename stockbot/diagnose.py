@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 
-from . import news, tradingview, yahoo
+from . import chart, history, news, tradingview, yahoo
 import requests
 
 from .http import (
@@ -215,6 +215,34 @@ def check_yahoo_chart() -> bool:
     return True
 
 
+def check_history() -> bool:
+    """Qrafiklər üçün günlük tarixçə (Stooq)."""
+
+    candles = history.daily_closes("AAPL", "NASDAQ")
+    if len(candles) < chart.MIN_POINTS:
+        _line("Stooq tarixçəsi", False, f"{len(candles)} gün — qrafik çəkilməyəcək")
+        return False
+    _line(
+        "Stooq tarixçəsi",
+        True,
+        f"{len(candles)} gün, son bağlanış {candles[-1].close:,.2f}"
+        f" ({candles[-1].day})",
+    )
+    return True
+
+
+def check_chart() -> bool:
+    """matplotlib quraşdırılıbmı — şəkil çəkilə bilirmi?"""
+
+    candles = history.daily_closes("AAPL", "NASDAQ")
+    png = chart.render("AAPL", "Apple Inc.", candles, 1.0, "USD")
+    if not png:
+        _line("Qrafik (matplotlib)", False, "çəkilmədi — bot yalnız mətn göndərəcək")
+        return False
+    _line("Qrafik (matplotlib)", True, f"PNG hazırlandı ({len(png) // 1024} KB)")
+    return True
+
+
 def main() -> int:
     logging.basicConfig(level=logging.WARNING, format="   %(levelname)s %(message)s")
 
@@ -227,10 +255,14 @@ def main() -> int:
         "Yahoo crumb": check_yahoo_crumb(),
         "Yahoo xəbərlər (JSON)": check_yahoo_news(),
         "Yahoo chart": check_yahoo_chart(),
+        "Stooq tarixçəsi": check_history(),
+        "Qrafik (matplotlib)": check_chart(),
     }
 
     if not results["Yahoo RSS"]:
         check_yahoo_header_variants()
+
+    chart_ok = results["Stooq tarixçəsi"] and results["Qrafik (matplotlib)"]
 
     print()
     # Yalnız RSS və ya JSON-dan biri işləsə, xəbərlər gəlir — ikisi də şərt deyil.
@@ -256,6 +288,9 @@ def main() -> int:
         print("Xəbərlər Yahoo JSON API ilə gəlir.")
     else:
         print("Xəbərlər işləmir — /xeber boş qayıdacaq.")
+
+    if not chart_ok:
+        print("Qrafik göndərilməyəcək — /izle və /s yalnız mətn qaytaracaq.")
 
     return 0 if (price_ok and news_ok) else 1
 

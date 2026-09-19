@@ -427,3 +427,93 @@ def test_get_news_tries_next_source_when_all_items_are_old():
 def test_empty_news_message_names_the_window():
     assert "son 3 gündə yeni xəbər yoxdur" in formatting.format_news("AAPL", [], 3)
     assert "yeni xəbər yoxdur" in formatting.format_news("AAPL", [])
+
+
+def _candles(count=30, start=100.0):
+    from datetime import date
+
+    from stockbot.history import Candle
+
+    return [
+        Candle(day=date(2026, 9, 1) + timedelta(days=i), close=start + i)
+        for i in range(count)
+    ]
+
+
+def test_stooq_symbol_mapping():
+    from stockbot.history import stooq_symbol
+
+    assert stooq_symbol("MU", "NASDAQ") == "mu.us"
+    assert stooq_symbol("NASDAQ:NVDA") == "nvda.us"
+    assert stooq_symbol("VOD", "LSE") == "vod.uk"
+
+
+def test_history_parses_csv_and_ignores_bad_rows():
+    from stockbot.history import _parse_csv
+
+    csv_text = (
+        "Date,Open,High,Low,Close,Volume\n"
+        "2026-09-17,975.0,980.1,970.2,977.5,31000000\n"
+        "bad,row,without,numbers,here,0\n"
+        "2026-09-18,978.0,1016.44,977.83,1015.80,35800000\n"
+    )
+    candles = _parse_csv(csv_text, "mu.us")
+
+    assert [c.close for c in candles] == [977.5, 1015.80]
+    assert candles[-1].day.isoformat() == "2026-09-18"
+    # Simvol tapılmayanda Stooq CSV yerinə mətn qaytarır.
+    assert _parse_csv("No data", "zzz.us") == []
+
+
+def test_chart_needs_enough_points():
+    from stockbot import chart
+
+    assert chart.render("MU", "Micron", _candles(3), 1.0, "USD") is None
+    png = chart.render("MU", "Micron", _candles(30), 1.0, "USD")
+    assert png is not None and png[:4] == b"\x89PNG"
+
+
+def test_send_quote_falls_back_to_text_without_a_chart():
+    import os
+    import tempfile
+
+    from stockbot.bot import Bot
+    from stockbot.config import Config
+
+    config = Config.from_env(
+        {"TELEGRAM_BOT_TOKEN": "t", "STATE_PATH": os.path.join(tempfile.mkdtemp(), "s.json")}
+    )
+    bot = Bot(config)
+    bot.client = MagicMock()
+
+    with patch("stockbot.service.quote_card", return_value=("mətn", None)):
+        bot._send_quote(1, "MU")
+    assert bot.client.send_message.called and not bot.client.send_photo.called
+
+    bot.client.reset_mock()
+    with patch("stockbot.service.quote_card", return_value=("mətn", b"png")):
+        bot._send_quote(1, "MU")
+    assert bot.client.send_photo.called and not bot.client.send_message.called
+
+
+def test_chart_uses_the_live_price_as_its_last_point():
+    """Qrafikdəki son rəqəm altyazıdakı qiymətlə eyni olmalıdır."""
+
+    from datetime import date
+
+    from stockbot.chart import _with_live_price
+    from stockbot.history import Candle
+
+    history = _candles(5, start=100.0)  # 01-05 sentyabr, son bağlanış 104
+    extended = _with_live_price(history, 111.5)
+    assert extended[-1].close == 111.5
+    assert extended[-1].day == date.today()
+    assert len(extended) == len(history) + 1
+
+    # Tarixçə artıq bugünü əhatə edirsə, sonuncu nöqtə əvəzlənir.
+    today_history = history[:-1] + [Candle(day=date.today(), close=104.0)]
+    replaced = _with_live_price(today_history, 111.5)
+    assert len(replaced) == len(today_history)
+    assert replaced[-1].close == 111.5
+
+    assert _with_live_price(history, None) == history
