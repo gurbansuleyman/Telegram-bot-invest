@@ -34,8 +34,7 @@ Səhvən paylaşsan: BotFather → `/revoke`.
 Əvvəlcə öz kompüterində işlədib gör, hər şey qaydasındadırmı.
 
 ```bash
-git clone -b claude/funny-maxwell-qn9wq4 \
-  https://github.com/gurbansuleyman/Telegram-bot-invest.git
+git clone https://github.com/gurbansuleyman/Telegram-bot-invest.git
 cd Telegram-bot-invest
 
 python3 -m venv .venv
@@ -82,8 +81,7 @@ ssh root@SERVER_IP
 apt update && apt install -y python3-venv git
 adduser --disabled-password --gecos "" bot
 
-git clone -b claude/funny-maxwell-qn9wq4 \
-  https://github.com/gurbansuleyman/Telegram-bot-invest.git /opt/invest-bot
+git clone https://github.com/gurbansuleyman/Telegram-bot-invest.git /opt/invest-bot
 cd /opt/invest-bot
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -137,9 +135,11 @@ docker logs -f invest-bot
 
 ## Yeniləmə
 
+Server həmişə `main`-dən deploy olunur.
+
 ```bash
 cd /opt/invest-bot
-git pull
+git pull origin main
 .venv/bin/pip install -r requirements.txt
 systemctl restart invest-bot
 ```
