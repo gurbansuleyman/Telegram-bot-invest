@@ -113,6 +113,7 @@ def test_format_news_links():
         tickers=["AAPL"],
     )
     text = formatting.format_news("AAPL", [item])
+    assert "son xəbərlər" in text
     assert "Apple &amp; Co" in text
     assert "b=1&amp;c=2" in text
     assert "3 saat əvvəl" in text
@@ -352,3 +353,37 @@ def test_yahoo_rss_cooldown_skips_next_call():
         assert session.get.call_count == 1  # ikinci sorğu göndərilmədi
 
     yahoo.reset_session()
+
+
+def _quote(ticker_price, prev, change_1d, change_1w):
+    from stockbot.tradingview import Quote
+
+    return Quote(
+        symbol=f"NASDAQ:{ticker_price[0]}",
+        name=ticker_price[0],
+        description=f"{ticker_price[0]} Inc",
+        price=ticker_price[1],
+        currency="USD",
+        change_1d=change_1d,
+        change_1d_abs=ticker_price[1] - prev,
+        change_1w=change_1w,
+        change_1m=None,
+        change_ytd=None,
+        volume=None,
+        market_cap=None,
+        exchange="NASDAQ",
+    )
+
+
+def test_digest_shows_daily_move_from_to():
+    quotes = {
+        "NVDA": _quote(("NVDA", 178.20), 174.45, 2.15, -1.40),
+        "AAPL": _quote(("AAPL", 336.13), 337.00, -0.26, 2.65),
+    }
+    text = formatting.format_digest(quotes, [], {})
+
+    assert "1 gün: 174.45 → <b>178.20</b> (+2.15%)" in text
+    assert "1 gün: 337.00 → <b>336.13</b> (-0.26%)" in text
+    assert "1 həftə: -1.40%" in text
+    # Ən çox qalxan yuxarıda olmalıdır.
+    assert text.index("NVDA") < text.index("AAPL")

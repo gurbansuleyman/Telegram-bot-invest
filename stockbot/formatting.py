@@ -90,7 +90,8 @@ def format_news(ticker: str, items: list[NewsItem]) -> str:
     if not items:
         return f"📰 <b>{escape(ticker)}</b> üzrə yeni xəbər tapılmadı."
 
-    lines = [f"📰 <b>{escape(ticker)}</b> — Yahoo Finance xəbərləri"]
+    # Mənbə Yahoo və ya Google News ola bilər — hər xəbərin yanında göstərilir.
+    lines = [f"📰 <b>{escape(ticker)}</b> — son xəbərlər"]
     for item in items:
         meta = " · ".join(
             part for part in (escape(item.publisher), _ago(item.published)) if part
@@ -118,9 +119,13 @@ def format_digest(
     )
     for ticker, quote in ranked:
         lines.append(
-            f"{marker(quote.change_1d)} <b>{escape(ticker)}</b>  "
-            f"{money(quote.price, quote.currency)}  "
-            f"1g {pct(quote.change_1d)} · 1h {pct(quote.change_1w)}"
+            f"{marker(quote.change_1d)} <b>{escape(ticker)}</b> — "
+            f"{money(quote.price, quote.currency)}"
+        )
+        # Günün hərəkəti nədən nəyə: dünənki bağlanışdan indiki qiymətə.
+        lines.append(
+            f"   1 gün: {move(quote.prev_close, quote.price, quote.change_1d)}"
+            f" · 1 həftə: {pct(quote.change_1w)}"
         )
 
     if missing:
