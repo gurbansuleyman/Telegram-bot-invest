@@ -77,6 +77,7 @@ docker run -d --env-file .env -v "$PWD/data:/data" --name invest-bot invest-bot
 | `DIGEST_CHAT_ID` | Gündəlik xülasənin göndəriləcəyi chat (`/id` ilə öyrən) |
 | `DIGEST_TIME` | Xülasə saatı, `HH:MM`, **UTC**. Boş = söndürülüb |
 | `NEWS_PER_SYMBOL` | Hər simvol üçün xəbər sayı (default 4) |
+| `NEWS_MAX_AGE_DAYS` | Bundan köhnə xəbərlər göstərilmir (default 3, `0` = filtrsiz) |
 | `STATE_PATH` | İzləmə siyahılarının JSON faylı (default `state.json`) |
 
 Gündəlik xülasə üçün: botu işə sal → `/id` yaz → çıxan rəqəmi `DIGEST_CHAT_ID`-ə

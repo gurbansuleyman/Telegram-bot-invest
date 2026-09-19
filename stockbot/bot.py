@@ -80,11 +80,15 @@ class Bot:
             reply = service.quotes_report(args or self.store.get(chat_id))
         elif command in ("/xeber", "/news"):
             reply = service.news_report(
-                args or self.store.get(chat_id)[:3], self.config.news_per_symbol
+                args or self.store.get(chat_id)[:3],
+                self.config.news_per_symbol,
+                self.config.news_max_age_days,
             )
         elif command in ("/xulase", "/digest"):
             reply = service.digest_report(
-                self.store.get(chat_id), self.config.news_per_symbol
+                self.store.get(chat_id),
+                self.config.news_per_symbol,
+                max_age_days=self.config.news_max_age_days,
             )
         elif command in ("/izle", "/watch"):
             reply = self._watch(chat_id, args)
@@ -224,7 +228,9 @@ class Bot:
             try:
                 chat_id = self.config.digest_chat_id
                 report = service.digest_report(
-                    self.store.get(chat_id), self.config.news_per_symbol
+                    self.store.get(chat_id),
+                    self.config.news_per_symbol,
+                    max_age_days=self.config.news_max_age_days,
                 )
                 self.client.send_message(chat_id, report)
             except Exception:

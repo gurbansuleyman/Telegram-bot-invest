@@ -387,3 +387,43 @@ def test_digest_shows_daily_move_from_to():
     assert "1 həftə: -1.40%" in text
     # Ən çox qalxan yuxarıda olmalıdır.
     assert text.index("NVDA") < text.index("AAPL")
+
+
+def _item(hours_old, title="x"):
+    from stockbot.news import NewsItem
+
+    published = None
+    if hours_old is not None:
+        published = datetime.now(timezone.utc) - timedelta(hours=hours_old)
+    return NewsItem(title, "Reuters", f"https://r.com/{title}", published, ["AAPL"])
+
+
+def test_recent_only_drops_old_and_keeps_undated():
+    from stockbot import news
+
+    items = [_item(2, "təzə"), _item(24 * 5, "köhnə"), _item(None, "tarixsiz")]
+    fresh = news.recent_only(items, 3)
+
+    assert [i.title for i in fresh] == ["təzə", "tarixsiz"]
+    # 0 = filtr söndürülüb.
+    assert len(news.recent_only(items, 0)) == 3
+
+
+def test_get_news_tries_next_source_when_all_items_are_old():
+    """Yahoo yalnız köhnə başlıq verirsə, Google News sınanmalıdır."""
+
+    from stockbot import news
+
+    stale = [_item(24 * 10, "köhnə")]
+    fresh = [_item(1, "təzə")]
+    with patch("stockbot.yahoo.get_news_rss", return_value=stale), \
+         patch("stockbot.news.google_news", return_value=fresh), \
+         patch("stockbot.yahoo.get_news_json", return_value=[]):
+        items = news.get_news("AAPL", 4, max_age_days=3)
+
+    assert [i.title for i in items] == ["təzə"]
+
+
+def test_empty_news_message_names_the_window():
+    assert "son 3 gündə yeni xəbər yoxdur" in formatting.format_news("AAPL", [], 3)
+    assert "yeni xəbər yoxdur" in formatting.format_news("AAPL", [])
