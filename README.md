@@ -114,6 +114,25 @@ stockbot/
 tests/            şəbəkəsiz vahid testlər (pytest)
 ```
 
+## Branch modeli
+
+| Branch | Rolu |
+| --- | --- |
+| `main` | Default branch. Həmişə işlək kod — server buradan deploy olunur |
+| `feat/...`, `fix/...`, `docs/...` | Qısamüddətli iş branch-ları |
+| tag `v0.1.0` | Buraxılış nişanı — serverdə hansı versiyanın işlədiyini bilmək üçün |
+
+`main`-ə birbaşa commit edilmir: iş branch-ında dəyişiklik → PR → təsdiq →
+merge → branch silinir. Bu, hər dəyişikliyin nə üçün edildiyini sonradan
+izləməyə imkan verir.
+
+```bash
+git switch main && git pull
+git switch -c feat/yeni-funksiya
+# ... dəyişiklik, commit ...
+git push -u origin feat/yeni-funksiya    # sonra GitHub-da PR aç
+```
+
 ## Testlər
 
 ```bash
