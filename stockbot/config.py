@@ -28,6 +28,7 @@ class Config:
     digest_chat_id: int | None = None
     digest_time: str | None = None
     news_per_symbol: int = 4
+    news_max_age_days: int = 3
     state_path: str = "state.json"
 
     @classmethod
@@ -52,6 +53,7 @@ class Config:
             digest_chat_id=int(digest_chat_raw) if digest_chat_raw else None,
             digest_time=digest_time,
             news_per_symbol=int(env.get("NEWS_PER_SYMBOL", "4")),
+            news_max_age_days=int(env.get("NEWS_MAX_AGE_DAYS", "3")),
             state_path=env.get("STATE_PATH", "state.json"),
         )
 

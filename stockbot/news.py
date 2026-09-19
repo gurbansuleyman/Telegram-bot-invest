@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
@@ -18,6 +18,9 @@ from .http import DEFAULT_TIMEOUT, SESSION
 log = logging.getLogger(__name__)
 
 GOOGLE_NEWS_URL = "https://news.google.com/rss/search"
+
+# Gündəlik xülasədə köhnə başlıq səs-küydür.
+DEFAULT_MAX_AGE_DAYS = 3
 
 
 @dataclass
@@ -29,16 +32,37 @@ class NewsItem:
     tickers: list[str]
 
 
-def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:
-    """Simvol üzrə xəbərlər — hansı mənbə cavab verirsə ondan."""
+def get_news(
+    ticker: str, limit: int = 4, max_age_days: int = DEFAULT_MAX_AGE_DAYS
+) -> list[NewsItem]:
+    """Simvol üzrə təzə xəbərlər — hansı mənbə cavab verirsə ondan.
+
+    Filtr hər mənbədən sonra tətbiq olunur: biri yalnız köhnə başlıq
+    qaytarsa, növbətisi sınanır.
+    """
 
     from . import yahoo  # dairəvi idxaldan qaçmaq üçün burada
 
+    # Filtr bir hissəsini kəsəcək, ona görə daha çox başlıq götürürük.
+    fetch_limit = max(limit * 3, 12)
     for fetch in (yahoo.get_news_rss, google_news, yahoo.get_news_json):
-        items = fetch(ticker, limit)
-        if items:
-            return newest_first(items, limit)
+        fresh = recent_only(fetch(ticker, fetch_limit), max_age_days)
+        if fresh:
+            return newest_first(fresh, limit)
     return []
+
+
+def recent_only(items: list[NewsItem], max_age_days: int) -> list[NewsItem]:
+    """Verilmiş gün sayından köhnə xəbərləri atır. 0 — filtr yoxdur."""
+
+    if not max_age_days:
+        return list(items)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    # Tarixi olmayan xəbəri atmırıq — yaşını bilmirik.
+    return [
+        item for item in items if item.published is None or item.published >= cutoff
+    ]
 
 
 def google_news(ticker: str, limit: int = 4) -> list[NewsItem]:

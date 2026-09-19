@@ -86,9 +86,12 @@ def format_snapshot(ticker: str, snapshot: Snapshot) -> str:
     )
 
 
-def format_news(ticker: str, items: list[NewsItem]) -> str:
+def format_news(
+    ticker: str, items: list[NewsItem], max_age_days: int | None = None
+) -> str:
     if not items:
-        return f"📰 <b>{escape(ticker)}</b> üzrə yeni xəbər tapılmadı."
+        window = f"son {max_age_days} gündə " if max_age_days else ""
+        return f"📰 <b>{escape(ticker)}</b> üzrə {window}yeni xəbər yoxdur."
 
     # Mənbə Yahoo və ya Google News ola bilər — hər xəbərin yanında göstərilir.
     lines = [f"📰 <b>{escape(ticker)}</b> — son xəbərlər"]
@@ -106,6 +109,7 @@ def format_digest(
     quotes: dict[str, Quote],
     missing: list[str],
     news_by_ticker: dict[str, list[NewsItem]],
+    max_age_days: int | None = None,
 ) -> str:
     """İzləmə siyahısının xülasəsi + ən çox hərəkət edən kağızların xəbərləri."""
 
@@ -139,7 +143,7 @@ def format_digest(
             if not items:
                 continue
             lines.append("")
-            lines.append(format_news(ticker, items))
+            lines.append(format_news(ticker, items, max_age_days))
 
     return "\n".join(lines)
 

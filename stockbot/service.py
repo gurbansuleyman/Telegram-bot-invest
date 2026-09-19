@@ -155,7 +155,7 @@ def quotes_report(queries: list[str]) -> str:
     return "\n\n".join(blocks) if blocks else "Heç bir simvol üzrə məlumat alınmadı."
 
 
-def news_report(queries: list[str], limit: int) -> str:
+def news_report(queries: list[str], limit: int, max_age_days: int = 3) -> str:
     if not queries:
         return "Simvol yazmalısan. Məsələn: <code>/xeber AAPL</code>"
 
@@ -166,11 +166,17 @@ def news_report(queries: list[str], limit: int) -> str:
             matches = resolve_query(query, limit=1)
             if matches:
                 ticker = matches[0].symbol
-        blocks.append(formatting.format_news(ticker, news.get_news(ticker, limit)))
+        items = news.get_news(ticker, limit, max_age_days)
+        blocks.append(formatting.format_news(ticker, items, max_age_days))
     return "\n\n".join(blocks)
 
 
-def digest_report(tickers: list[str], news_limit: int, movers: int = 3) -> str:
+def digest_report(
+    tickers: list[str],
+    news_limit: int,
+    movers: int = 3,
+    max_age_days: int = 3,
+) -> str:
     """İzləmə siyahısının xülasəsi + ən çox hərəkət edən kağızların xəbərləri."""
 
     if not tickers:
@@ -187,10 +193,10 @@ def digest_report(tickers: list[str], news_limit: int, movers: int = 3) -> str:
 
     top = _top_movers(merged, movers)
     news_by_ticker: dict[str, list[NewsItem]] = {
-        ticker: news.get_news(ticker, news_limit) for ticker in top
+        ticker: news.get_news(ticker, news_limit, max_age_days) for ticker in top
     }
 
-    return formatting.format_digest(merged, missing, news_by_ticker)
+    return formatting.format_digest(merged, missing, news_by_ticker, max_age_days)
 
 
 def _as_quote(snapshot: Snapshot) -> Quote:
