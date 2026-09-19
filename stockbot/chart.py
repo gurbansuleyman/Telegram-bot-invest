@@ -11,8 +11,14 @@ import logging
 from datetime import date
 
 from .history import Candle
+from .http import DEFAULT_TIMEOUT, SESSION
 
 log = logging.getLogger(__name__)
+
+# Tarixçə heç bir mənbədən gəlmirsə, hazır qrafik şəkli sonuncu şansdır.
+FINVIZ_URL = "https://charts2.finviz.com/chart.ashx"
+FINVIZ_HEADERS = {"Referer": "https://finviz.com/", "Accept": "image/png,*/*"}
+PNG_MAGIC = b"\x89PNG"
 
 # dataviz palitrası: səth, mətn və status rəngləri.
 SURFACE = "#fcfcfb"
@@ -86,6 +92,31 @@ def render(
     figure.savefig(buffer, format="png", facecolor=SURFACE)
     plt.close(figure)
     return buffer.getvalue()
+
+
+def remote_image(ticker: str) -> bytes | None:
+    """Finviz-in hazır günlük qrafiki — öz tarixçəmiz olmayanda.
+
+    Şəkil bizim palitrada deyil, amma boş mətndən yaxşıdır.
+    """
+
+    symbol = ticker.split(":")[-1].upper()
+    try:
+        response = SESSION.get(
+            FINVIZ_URL,
+            params={"t": symbol, "ty": "c", "ta": "0", "p": "d", "s": "l"},
+            headers=FINVIZ_HEADERS,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        log.warning("Finviz qrafiki alınmadı (%s): %s", symbol, exc)
+        return None
+
+    if not response.content.startswith(PNG_MAGIC):
+        log.warning("Finviz PNG qaytarmadı (%s)", symbol)
+        return None
+    return response.content
 
 
 def _with_live_price(candles: list[Candle], price: float | None) -> list[Candle]:

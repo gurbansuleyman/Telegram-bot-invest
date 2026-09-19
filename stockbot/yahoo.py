@@ -278,6 +278,26 @@ def get_snapshot(ticker: str) -> Snapshot | None:
     )
 
 
+def daily_closes(ticker: str, days: int = 30) -> list[tuple[int, float]]:
+    """Qrafik üçün (timestamp, bağlanış) cütləri. Yahoo bağlıdırsa boş siyahı."""
+
+    params = {"range": "3mo", "interval": "1d"}
+    body = _get(CHART_URL.format(symbol=ticker), params, f"Yahoo tarixçə ({ticker})")
+    try:
+        result = body["chart"]["result"][0]
+        stamps = result["timestamp"]
+        closes = result["indicators"]["quote"][0]["close"]
+    except (TypeError, KeyError, IndexError):
+        return []
+
+    pairs = [
+        (stamp, close)
+        for stamp, close in zip(stamps, closes)
+        if isinstance(close, (int, float))
+    ]
+    return pairs[-days:]
+
+
 def _percent(current: float | None, base: float | None) -> float | None:
     if current is None or not base:
         return None
