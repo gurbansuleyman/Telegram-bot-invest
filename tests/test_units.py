@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -184,3 +185,55 @@ def test_log_filter_redacts_token():
     redactor.filter(record)
     assert "SECRET" not in record.getMessage()
     assert "***" in record.getMessage()
+
+
+def _fake_response(body):
+    response = MagicMock()
+    response.json.return_value = body
+    return response
+
+
+def test_poll_posts_valid_payload_and_advances_offset():
+    """Telegram-ın `timeout` sahəsi HTTP timeout-u ilə toqquşmamalıdır."""
+
+    from stockbot.telegram import TelegramClient
+
+    client = TelegramClient("token", poll_timeout=30)
+    with patch("stockbot.telegram.SESSION") as session:
+        session.post.return_value = _fake_response(
+            {"ok": True, "result": [{"update_id": 7, "message": {}}]}
+        )
+        updates = list(client.poll())
+
+        args, kwargs = session.post.call_args
+        assert kwargs["json"]["timeout"] == 30           # Telegram sahəsi
+        assert kwargs["timeout"] == 45                   # HTTP timeout-u
+        assert "offset" not in kwargs["json"]
+        assert len(updates) == 1
+
+        session.post.return_value = _fake_response({"ok": True, "result": []})
+        list(client.poll())
+        assert session.post.call_args[1]["json"]["offset"] == 8
+
+
+def test_send_message_posts_each_chunk():
+    from stockbot.telegram import TelegramClient
+
+    client = TelegramClient("token")
+    with patch("stockbot.telegram.SESSION") as session:
+        session.post.return_value = _fake_response({"ok": True, "result": {}})
+        client.send_message(42, "x" * 5000)
+
+        assert session.post.call_count == 2
+        payload = session.post.call_args[1]["json"]
+        assert payload["chat_id"] == 42
+        assert payload["parse_mode"] == "HTML"
+
+
+def test_chat_action_failure_is_swallowed():
+    from stockbot.telegram import TelegramClient
+
+    client = TelegramClient("token")
+    with patch("stockbot.telegram.SESSION") as session:
+        session.post.side_effect = RuntimeError("şəbəkə yoxdur")
+        client.send_chat_action(42)  # xəta atmamalıdır

@@ -32,10 +32,16 @@ class TelegramClient:
 
         return text.replace(self._token, "***") if self._token else text
 
-    def _call(self, method: str, timeout: int, **payload):
+    def _call(self, method: str, http_timeout: int, payload: dict | None = None):
+        """Bir API metodunu çağırır.
+
+        Payload ayrıca dict-dir, **kwargs deyil: Telegram-ın öz sahələri
+        (məsələn getUpdates-in `timeout`-u) parametr adları ilə toqquşmasın.
+        """
+
         url = API_URL.format(token=self._token, method=method)
         try:
-            response = SESSION.post(url, json=payload, timeout=timeout)
+            response = SESSION.post(url, json=payload or {}, timeout=http_timeout)
             body = response.json()
         except Exception as exc:
             raise TelegramError(
@@ -49,7 +55,7 @@ class TelegramClient:
         return body.get("result")
 
     def get_me(self) -> dict:
-        return self._call("getMe", timeout=15)
+        return self._call("getMe", http_timeout=15)
 
     def poll(self) -> Iterator[dict]:
         """Növbəti yeniləmələri gətirir; xəta olarsa boş qaytarır."""
@@ -61,7 +67,9 @@ class TelegramClient:
         if self._offset is not None:
             payload["offset"] = self._offset
 
-        updates = self._call("getUpdates", timeout=self._poll_timeout + 15, **payload)
+        updates = self._call(
+            "getUpdates", http_timeout=self._poll_timeout + 15, payload=payload
+        )
         for update in updates or []:
             self._offset = update["update_id"] + 1
             yield update
@@ -70,16 +78,22 @@ class TelegramClient:
         for chunk in _split_message(text):
             self._call(
                 "sendMessage",
-                timeout=20,
-                chat_id=chat_id,
-                text=chunk,
-                parse_mode="HTML",
-                disable_web_page_preview=not preview,
+                http_timeout=20,
+                payload={
+                    "chat_id": chat_id,
+                    "text": chunk,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": not preview,
+                },
             )
 
     def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
         try:
-            self._call("sendChatAction", timeout=10, chat_id=chat_id, action=action)
+            self._call(
+                "sendChatAction",
+                http_timeout=10,
+                payload={"chat_id": chat_id, "action": action},
+            )
         except TelegramError as exc:
             log.debug("chat action göndərilmədi: %s", exc)
 
