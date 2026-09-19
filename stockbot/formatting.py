@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from html import escape
 
 from .tradingview import Quote
-from .yahoo import NewsItem, Snapshot
+from .news import NewsItem
+from .yahoo import Snapshot
 
 UP = "🟢"
 DOWN = "🔴"

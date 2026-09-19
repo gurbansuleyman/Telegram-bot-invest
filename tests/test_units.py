@@ -16,7 +16,7 @@ from stockbot.config import Config  # noqa: E402
 from stockbot.storage import WatchlistStore  # noqa: E402
 from stockbot.telegram import _split_message  # noqa: E402
 from stockbot.tradingview import Quote  # noqa: E402
-from stockbot.yahoo import NewsItem  # noqa: E402
+from stockbot.news import NewsItem  # noqa: E402
 
 
 def test_parse_command():
@@ -295,3 +295,43 @@ def test_yahoo_cooldown_skips_requests_after_429():
         assert session.get.call_count == calls_after_first
 
     yahoo.reset_session()
+
+
+GOOGLE_SAMPLE = b"""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item>
+    <title>Nvidia rallies on AI demand - Reuters</title>
+    <link>https://news.google.com/rss/articles/abc</link>
+    <pubDate>Fri, 19 Sep 2026 11:00:00 GMT</pubDate>
+    <source url="https://reuters.com">Reuters</source>
+  </item>
+</channel></rss>"""
+
+
+def test_google_news_strips_publisher_suffix():
+    from stockbot import news
+
+    response = MagicMock(content=GOOGLE_SAMPLE)
+    response.raise_for_status.return_value = None
+    with patch("stockbot.news.SESSION") as session:
+        session.get.return_value = response
+        items = news.google_news("NVDA", 3)
+
+    assert items[0].title == "Nvidia rallies on AI demand"
+    assert items[0].publisher == "Reuters"
+
+
+def test_get_news_falls_back_when_yahoo_is_empty():
+    """Yahoo 429 verəndə Google News-a keçməlidir."""
+
+    from stockbot import news
+
+    google_item = news.NewsItem("x", "Reuters", "https://r.com/x", None, ["NVDA"])
+    with patch("stockbot.yahoo.get_news_rss", return_value=[]) as rss, \
+         patch("stockbot.news.google_news", return_value=[google_item]) as google, \
+         patch("stockbot.yahoo.get_news_json", return_value=[]) as json_api:
+        items = news.get_news("NVDA", 3)
+
+    assert items == [google_item]
+    assert rss.called and google.called
+    assert not json_api.called  # Google cavab verdi, JSON-a ehtiyac qalmadı

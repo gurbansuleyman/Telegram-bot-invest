@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from . import formatting, tradingview, yahoo
+from . import formatting, news, tradingview, yahoo
 from .symbols import SymbolMatch, looks_like_ticker, rank
 from .tradingview import Quote, TradingViewError, get_quotes
-from .yahoo import NewsItem, Snapshot
+from .news import NewsItem
+from .yahoo import Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ def news_report(queries: list[str], limit: int) -> str:
             matches = resolve_query(query, limit=1)
             if matches:
                 ticker = matches[0].symbol
-        blocks.append(formatting.format_news(ticker, yahoo.get_news(ticker, limit)))
+        blocks.append(formatting.format_news(ticker, news.get_news(ticker, limit)))
     return "\n\n".join(blocks)
 
 
@@ -186,7 +187,7 @@ def digest_report(tickers: list[str], news_limit: int, movers: int = 3) -> str:
 
     top = _top_movers(merged, movers)
     news_by_ticker: dict[str, list[NewsItem]] = {
-        ticker: yahoo.get_news(ticker, news_limit) for ticker in top
+        ticker: news.get_news(ticker, news_limit) for ticker in top
     }
 
     return formatting.format_digest(merged, missing, news_by_ticker)

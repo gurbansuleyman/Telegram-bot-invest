@@ -9,8 +9,16 @@ from __future__ import annotations
 import json
 import logging
 
-from . import tradingview, yahoo
-from .http import DEFAULT_TIMEOUT, SESSION, TRADINGVIEW_HEADERS, YAHOO_HEADERS
+from . import news, tradingview, yahoo
+import requests
+
+from .http import (
+    DEFAULT_TIMEOUT,
+    SESSION,
+    TRADINGVIEW_HEADERS,
+    USER_AGENT,
+    YAHOO_HEADERS,
+)
 
 OK = "✅"
 FAIL = "❌"
@@ -88,6 +96,47 @@ def check_tradingview_search() -> bool:
         return False
 
     _line("TradingView axtarış", True, ", ".join(m.full for m in matches))
+    return True
+
+
+def check_yahoo_header_variants() -> None:
+    """429-un səbəbini ayırd edir: IP blokudur, yoxsa göndərdiyimiz başlıqlar?
+
+    Üç variant sınanır. Hamısı 429 olsa — Yahoo bu IP-ni bloklayıb.
+    Yalnız birincisi 429 olsa — günahkar bizim başlıqlarımızdır.
+    """
+
+    variants = {
+        "botun başlıqları": {**SESSION.headers, **YAHOO_HEADERS},
+        "sadə brauzer UA": {"User-Agent": USER_AGENT, "Accept": "*/*"},
+        "başlıqsız": {"User-Agent": "curl/8.0"},
+    }
+    print("   Yahoo RSS başlıq testi:")
+    for name, headers in variants.items():
+        try:
+            response = requests.get(
+                yahoo.RSS_URL,
+                params={"s": "AAPL", "region": "US", "lang": "en-US"},
+                headers=headers,
+                timeout=DEFAULT_TIMEOUT,
+            )
+            print(f"     • {name}: HTTP {response.status_code}")
+        except Exception as exc:
+            print(f"     • {name}: bağlantı alınmadı ({type(exc).__name__})")
+
+
+def check_google_news() -> bool:
+    """Yahoo bağlı olanda xəbərlərin gəldiyi yol."""
+
+    items = news.google_news("AAPL", 3)
+    if not items:
+        _line("Google News", False, "boş cavab")
+        return False
+    _line(
+        "Google News",
+        True,
+        f"{len(items)} xəbər — {_excerpt(items[0].title, 55)} ({items[0].publisher})",
+    )
     return True
 
 
@@ -174,14 +223,22 @@ def main() -> int:
         "TradingView scanner": check_tradingview_scan(),
         "TradingView axtarış": check_tradingview_search(),
         "Yahoo RSS": check_yahoo_rss(),
+        "Google News": check_google_news(),
         "Yahoo crumb": check_yahoo_crumb(),
         "Yahoo xəbərlər (JSON)": check_yahoo_news(),
         "Yahoo chart": check_yahoo_chart(),
     }
 
+    if not results["Yahoo RSS"]:
+        check_yahoo_header_variants()
+
     print()
     # Yalnız RSS və ya JSON-dan biri işləsə, xəbərlər gəlir — ikisi də şərt deyil.
-    news_ok = results["Yahoo RSS"] or results["Yahoo xəbərlər (JSON)"]
+    news_ok = (
+        results["Yahoo RSS"]
+        or results["Google News"]
+        or results["Yahoo xəbərlər (JSON)"]
+    )
     price_ok = results["TradingView scanner"] or results["Yahoo chart"]
 
     if results["TradingView scanner"]:
@@ -192,9 +249,11 @@ def main() -> int:
         print("Qiymət mənbəyi yoxdur — /s və /xulase boş qayıdacaq.")
 
     if results["Yahoo RSS"]:
-        print("Xəbərlər RSS axını ilə işləyir.")
+        print("Xəbərlər Yahoo RSS axını ilə işləyir.")
+    elif results["Google News"]:
+        print("Yahoo bu IP-ni bloklayıb — xəbərlər Google News ilə gəlir.")
     elif results["Yahoo xəbərlər (JSON)"]:
-        print("RSS bağlıdır, xəbərlər JSON API ilə gəlir.")
+        print("Xəbərlər Yahoo JSON API ilə gəlir.")
     else:
         print("Xəbərlər işləmir — /xeber boş qayıdacaq.")
 

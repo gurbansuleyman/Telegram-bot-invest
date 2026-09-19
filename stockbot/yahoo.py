@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
 from .http import DEFAULT_TIMEOUT, SESSION, YAHOO_HEADERS
+from .news import NewsItem, newest_first, parse_rss
 from .symbols import SymbolMatch
 
 log = logging.getLogger(__name__)
@@ -120,15 +121,6 @@ def _get(url: str, params: dict, what: str) -> dict | None:
 
 
 @dataclass
-class NewsItem:
-    title: str
-    publisher: str
-    link: str
-    published: datetime | None
-    tickers: list[str]
-
-
-@dataclass
 class Snapshot:
     """Yahoo chart endpoint-indən hesablanan qiymət mənzərəsi."""
 
@@ -169,7 +161,11 @@ def search_symbols(text: str, limit: int = 8) -> list[SymbolMatch]:
 
 
 def get_news_rss(ticker: str, limit: int = 4) -> list[NewsItem]:
-    """Yahoo-nun RSS axını: crumb və cookie tələb etmir, limitə düşmür."""
+    """Yahoo-nun RSS axını: crumb və cookie tələb etmir.
+
+    Bəzi IP-lər üçün Yahoo bunu da 429 ilə bağlayır — o halda çağıran tərəf
+    başqa mənbəyə keçir.
+    """
 
     params = {"s": ticker, "region": "US", "lang": "en-US"}
     try:
@@ -177,55 +173,15 @@ def get_news_rss(ticker: str, limit: int = 4) -> list[NewsItem]:
             RSS_URL, params=params, headers=YAHOO_HEADERS, timeout=DEFAULT_TIMEOUT
         )
         response.raise_for_status()
-        root = ET.fromstring(response.content)
     except Exception as exc:
         log.warning("Yahoo RSS alınmadı (%s): %s", ticker, exc)
         return []
 
-    items: list[NewsItem] = []
-    for node in root.iterfind(".//item"):
-        title = (node.findtext("title") or "").strip()
-        link = (node.findtext("link") or "").strip()
-        if not title or not link:
-            continue
-        items.append(
-            NewsItem(
-                title=title,
-                publisher=(node.findtext("source") or "").strip() or _host(link),
-                link=link,
-                published=_parse_rss_date(node.findtext("pubDate")),
-                tickers=[ticker.upper()],
-            )
-        )
-        if len(items) >= limit:
-            break
-    return items
+    return parse_rss(response.content, ticker, limit)
 
 
-def _host(link: str) -> str:
-    return urlparse(link).netloc.replace("www.", "")
-
-
-def _parse_rss_date(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        moment = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return None
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
-
-
-def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:
-    """Simvol üzrə Yahoo Finance xəbərləri (ən yenidən köhnəyə).
-
-    Əvvəl RSS sınanır — o, açıqdır və limit qoymur. Boş qayıtsa, JSON
-    axtarış API-si (cookie + crumb tələb edən) ehtiyat kimi işləyir.
-    """
-
-    items = get_news_rss(ticker, limit)
-    if items:
-        return _newest_first(items, limit)
+def get_news_json(ticker: str, limit: int = 4) -> list[NewsItem]:
+    """Yahoo-nun axtarış API-si — cookie + crumb tələb edir, tez-tez limitə düşür."""
 
     params = {
         "q": ticker,
@@ -254,13 +210,7 @@ def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:
             )
         )
 
-    return _newest_first(items, limit)
-
-
-def _newest_first(items: list[NewsItem], limit: int) -> list[NewsItem]:
-    oldest = datetime.min.replace(tzinfo=timezone.utc)
-    items.sort(key=lambda item: item.published or oldest, reverse=True)
-    return items[:limit]
+    return newest_first(items, limit)
 
 
 def get_snapshot(ticker: str) -> Snapshot | None:
