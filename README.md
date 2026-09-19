@@ -114,6 +114,12 @@ stockbot/
 tests/            şəbəkəsiz vahid testlər (pytest)
 ```
 
+## 24/7 işlətmək
+
+macOS-da, pulsuz: `./deploy/install-macos.sh` — launchd xidməti qurur, Mac
+açılanda bot özü işə düşür. Server variantı (systemd/Docker) və bütün
+təfərrüatlar: [DEPLOY.md](DEPLOY.md).
+
 ## Branch modeli
 
 | Branch | Rolu |
