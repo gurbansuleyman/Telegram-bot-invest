@@ -105,60 +105,96 @@ hamısına cavab verir.
 
 ---
 
-## Addım 3b — 24/7 üçün VPS (Hetzner)
+## Addım 3b — Oracle Cloud (pulsuz, 24/7)
 
-Lokalda işlədisə, serverə keçiririk.
+Always Free hesabı həqiqətən pulsuzdur və müddətsizdir. Mac bağlı olsa da bot
+işləyir.
 
-**Server:** Hetzner Cloud → **CAX11** (ARM, 2 vCPU / 4 GB, ~€3.8/ay),
-location Falkenstein və ya Helsinki. Oracle Cloud Always Free də uyğundur
-(ARM, pulsuz), amma bəzən "out of capacity" verir.
+### Hesab və maşın
+
+1. **cloud.oracle.com** → *Sign up*. **Home Region** seçimi sonradan dəyişmir —
+   Bakıdan ən uyğunu **Germany Central (Frankfurt)** və ya **UK South (London)**.
+2. Kart tələb olunur — yalnız təsdiq üçün, pul çıxmır.
+3. Konsol → *Compute* → *Instances* → *Create instance*.
+4. **Image:** Ubuntu 24.04. **Shape:** *Ampere A1 Flex* (ARM), 1 OCPU / 6 GB —
+   Always Free limiti 4 OCPU / 24 GB-dır, bota bundan azı da bəsdir.
+   *Out of capacity* çıxsa: ya bir neçə saatdan sonra təkrar cəhd et, ya da
+   **VM.Standard.E2.1.Micro** (AMD) götür — o, demək olar həmişə tapılır və
+   bot üçün yetərlidir.
+5. SSH açarını əlavə et. Yoxdursa: `ssh-keygen -t ed25519` → `~/.ssh/id_ed25519.pub`
+   faylının məzmununu yapışdır.
+6. *Create* → maşının **Public IP**-sini götür.
+
+**Port açmaq lazım deyil.** Bot Telegram-a özü qoşulur (long polling), gələn
+bağlantı qəbul etmir. Default security list-də yalnız SSH (22) açıqdır — elə
+qalsın.
+
+### Quraşdırma
+
+```bash
+ssh ubuntu@SERVER_IP
+
+sudo apt update && sudo apt install -y git python3-venv
+git clone https://github.com/gurbansuleyman/Telegram-bot-invest.git
+cd Telegram-bot-invest
+
+cp .env.example .env
+nano .env        # TELEGRAM_BOT_TOKEN, ALLOWED_CHAT_IDS, DIGEST_CHAT_ID, DIGEST_TIME
+
+sudo ./deploy/install-linux.sh
+```
+
+Skript venv qurur, asılılıqları yükləyir, systemd xidmətini yazır və işə salır.
+Xidmət root altında yox, repo sahibinin adından işləyir.
+
+```bash
+journalctl -u invest-bot -f        # 'bot işə düşdü: @...' görünməlidir
+python -m stockbot.diagnose        # mənbələr serverdən necə cavab verir
+```
+
+Serverin IP-si Mac-dən fərqlidir — Yahoo orada bloklanmaya da bilər. `diagnose`
+bunu göstərəcək.
+
+| Əməliyyat | Komanda |
+| --- | --- |
+| Loglar | `journalctl -u invest-bot -f` |
+| Vəziyyət | `systemctl status invest-bot` |
+| Yenilə | `git pull && sudo systemctl restart invest-bot` |
+| Dayandır | `sudo systemctl stop invest-bot` |
+| Tamam sil | `sudo ./deploy/install-linux.sh --uninstall` |
+
+Mac-dəki xidməti söndürməyi unutma, yoxsa iki bot eyni tokenlə polling edər və
+mesajlar növbə ilə birinə, birinə düşər:
+
+```bash
+launchctl bootout gui/$(id -u)/com.gurbansuleyman.investbot
+```
+
+### Bilməli olduğun bir risk
+
+Oracle **boş dayanan** Always Free maşınları geri ala bilər (7 gün ərzində CPU
+davamlı çox aşağı olanda). Bizim bot demək olar heç bir CPU yemir, yəni bu
+meyara düşə bilər. Qarşısını almağın yolu: hesabı **Pay As You Go**-ya keçirmək
+— Always Free resursları yenə pulsuz qalır, sadəcə geri alınma qaydası tətbiq
+olunmur. Kartdan pul çıxması üçün pulsuz limitdən kənara çıxmaq lazımdır.
+
+---
+
+## Addım 3c — Hetzner VPS (~€3.8/ay)
+
+Oracle-da maşın tapa bilmirsənsə: Hetzner Cloud → **CAX11** (ARM, 2 vCPU / 4 GB),
+location Falkenstein və ya Helsinki. Qeydiyyat daha sadədir, maşın həmişə var.
+
+Quraşdırma Oracle ilə eynidir — eyni skript:
 
 ```bash
 ssh root@SERVER_IP
-
-apt update && apt install -y python3-venv git
-adduser --disabled-password --gecos "" bot
-
-git clone https://github.com/gurbansuleyman/Telegram-bot-invest.git /opt/invest-bot
-cd /opt/invest-bot
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-
-cp .env.example .env
-nano .env                    # token + ALLOWED_CHAT_IDS + DIGEST_*
-chmod 600 .env
-chown -R bot:bot /opt/invest-bot
+apt update && apt install -y git python3-venv
+git clone https://github.com/gurbansuleyman/Telegram-bot-invest.git
+cd Telegram-bot-invest
+cp .env.example .env && nano .env
+sudo ./deploy/install-linux.sh
 ```
-
-`/etc/systemd/system/invest-bot.service`:
-
-```ini
-[Unit]
-Description=Telegram Invest Bot
-After=network-online.target
-
-[Service]
-Type=simple
-User=bot
-WorkingDirectory=/opt/invest-bot
-EnvironmentFile=/opt/invest-bot/.env
-ExecStart=/opt/invest-bot/.venv/bin/python -m stockbot
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl daemon-reload
-systemctl enable --now invest-bot
-systemctl status invest-bot
-journalctl -u invest-bot -f        # canlı loglar
-```
-
-`Restart=always` sayəsində bot çöksə və ya server reboot olsa, özü qalxır.
-Firewall-da yalnız SSH (22) açıq qalsın — bota port lazım deyil.
 
 ### Docker variantı
 
@@ -176,10 +212,10 @@ docker logs -f invest-bot
 Server həmişə `main`-dən deploy olunur.
 
 ```bash
-cd /opt/invest-bot
+cd ~/Telegram-bot-invest
 git pull origin main
 .venv/bin/pip install -r requirements.txt
-systemctl restart invest-bot
+sudo systemctl restart invest-bot
 ```
 
 ---
