@@ -130,8 +130,20 @@ class Bot:
                 alt = ", ".join(f"<code>/izle {escape(m.full)}</code>" for m in alternatives)
                 lines.append(f"   <i>Başqası idisə: {alt}</i>")
 
-        current = self.store.add(chat_id, to_add) if to_add else self.store.get(chat_id)
-        return "\n".join(lines) + "\n\n" + _watchlist_text(current)
+        if not to_add:
+            return "\n".join(lines) + "\n\n" + _watchlist_text(self.store.get(chat_id))
+
+        current = self.store.add(chat_id, to_add)
+        # Əlavə edən kimi cari vəziyyəti göstəririk — ayrıca /s yazmağa ehtiyac qalmasın.
+        return "\n".join(
+            [
+                "\n".join(lines),
+                "",
+                service.quotes_report(to_add),
+                "",
+                _watchlist_text(current),
+            ]
+        )
 
     def _unwatch(self, chat_id: int, queries: list[str]) -> str:
         """Siyahıdan çıxarır; ad yazılıbsa əvvəlcə ticker-ə çevirir."""

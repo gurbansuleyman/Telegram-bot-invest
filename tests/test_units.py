@@ -94,8 +94,14 @@ def test_format_quote_escapes_html():
     )
     text = formatting.format_quote("AAPL", quote)
     assert "Apple &lt;Inc&gt;" in text
-    assert "1 gün: <b>+1.50%</b>" in text
-    assert "1 həftə: <b>-2.00%</b>" in text
+    # Nədən nəyə: 232.40 - 3.40 = 229.00
+    assert "1 gün: 229.00 → <b>232.40</b> (+1.50%)" in text
+    assert "1 həftə: 237.14 → <b>232.40</b> (-2.00%)" in text
+
+
+def test_move_falls_back_to_percent_only():
+    assert formatting.move(None, 100.0, 1.5) == "<b>+1.50%</b>"
+    assert formatting.move(98.0, 100.0, 2.04) == "98.00 → <b>100.00</b> (+2.04%)"
 
 
 def test_format_news_links():

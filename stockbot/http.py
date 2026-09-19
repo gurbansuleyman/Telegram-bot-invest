@@ -13,6 +13,18 @@ USER_AGENT = (
 
 DEFAULT_TIMEOUT = 15
 
+# Hər iki API brauzerdən gələn sorğu gözləyir; bu başlıqlar olmadan 403 verir.
+TRADINGVIEW_HEADERS = {
+    "Origin": "https://www.tradingview.com",
+    "Referer": "https://www.tradingview.com/",
+    "Content-Type": "application/json",
+}
+
+YAHOO_HEADERS = {
+    "Origin": "https://finance.yahoo.com",
+    "Referer": "https://finance.yahoo.com/",
+}
+
 
 def build_session() -> requests.Session:
     session = requests.Session()
@@ -23,10 +35,12 @@ def build_session() -> requests.Session:
             "Accept-Language": "en-US,en;q=0.9",
         }
     )
+    # 429 qəsdən siyahıda deyil: təkrar sorğu rate limit-i daha da pisləşdirir,
+    # üstəlik hər təkrar istifadəçini gözlədir.
     retry = Retry(
-        total=3,
-        backoff_factor=0.8,
-        status_forcelist=(429, 500, 502, 503, 504),
+        total=2,
+        backoff_factor=0.5,
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=frozenset({"GET", "POST"}),
     )
     adapter = HTTPAdapter(max_retries=retry, pool_maxsize=16)

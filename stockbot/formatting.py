@@ -47,14 +47,24 @@ def compact(value: float | None) -> str:
     return f"{value:,.0f}"
 
 
+def move(base: float | None, now: float | None, change: float | None) -> str:
+    """`232.10 → 235.40 (+1.42%)` — nədən nəyə və neçə faiz."""
+
+    if base is None or now is None:
+        return f"<b>{pct(change)}</b>"
+    return f"{base:,.2f} → <b>{now:,.2f}</b> ({pct(change)})"
+
+
 def format_quote(ticker: str, quote: Quote) -> str:
     exchange = f" · {escape(quote.exchange)}" if quote.exchange else ""
     lines = [
         f"{marker(quote.change_1d)} <b>{escape(ticker)}</b> — {escape(quote.display)}{exchange}",
         f"Qiymət: <b>{money(quote.price, quote.currency)}</b>",
-        f"1 gün: <b>{pct(quote.change_1d)}</b>",
-        f"1 həftə: <b>{pct(quote.change_1w)}</b>",
+        f"1 gün: {move(quote.prev_close, quote.price, quote.change_1d)}",
+        f"1 həftə: {move(quote.week_ago, quote.price, quote.change_1w)}",
     ]
+    if quote.day_low is not None and quote.day_high is not None:
+        lines.append(f"Gün aralığı: {quote.day_low:,.2f} – {quote.day_high:,.2f}")
     if quote.change_1m is not None:
         lines.append(f"1 ay: {pct(quote.change_1m)}")
     if quote.volume is not None:
@@ -69,8 +79,8 @@ def format_snapshot(ticker: str, snapshot: Snapshot) -> str:
         [
             f"{marker(snapshot.change_1d)} <b>{escape(ticker)}</b> — {escape(snapshot.name)} · Yahoo",
             f"Qiymət: <b>{money(snapshot.price, snapshot.currency)}</b>",
-            f"1 gün: <b>{pct(snapshot.change_1d)}</b>",
-            f"1 həftə: <b>{pct(snapshot.change_1w)}</b>",
+            f"1 gün: {move(snapshot.prev_close, snapshot.price, snapshot.change_1d)}",
+            f"1 həftə: {move(snapshot.week_ago, snapshot.price, snapshot.change_1w)}",
         ]
     )
 

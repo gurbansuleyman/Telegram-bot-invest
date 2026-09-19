@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from .http import DEFAULT_TIMEOUT, SESSION
+from .http import DEFAULT_TIMEOUT, SESSION, TRADINGVIEW_HEADERS
 from .symbols import SymbolMatch
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,9 @@ COLUMNS = [
     "volume",
     "market_cap_basic",
     "exchange",
+    "open",
+    "low",
+    "high",
 ]
 
 
@@ -47,10 +50,29 @@ class Quote:
     volume: float | None
     market_cap: float | None
     exchange: str | None
+    day_open: float | None = None
+    day_low: float | None = None
+    day_high: float | None = None
 
     @property
     def display(self) -> str:
         return self.description or self.name
+
+    @property
+    def prev_close(self) -> float | None:
+        """Dünənki bağlanış: bugünkü qiymətdən mütləq dəyişimi çıxırıq."""
+
+        if self.price is None or self.change_1d_abs is None:
+            return None
+        return self.price - self.change_1d_abs
+
+    @property
+    def week_ago(self) -> float | None:
+        """Bir həftə əvvəlki qiymət — həftəlik faizdən geri hesablanır."""
+
+        if self.price is None or self.change_1w is None or self.change_1w <= -100:
+            return None
+        return self.price / (1 + self.change_1w / 100)
 
 
 class TradingViewError(RuntimeError):
@@ -70,7 +92,12 @@ def search_symbols(text: str, limit: int = 8) -> list[SymbolMatch]:
         "domain": "production",
     }
     try:
-        response = SESSION.get(SEARCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
+        response = SESSION.get(
+            SEARCH_URL,
+            params=params,
+            headers=TRADINGVIEW_HEADERS,
+            timeout=DEFAULT_TIMEOUT,
+        )
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:
@@ -155,7 +182,12 @@ def get_quotes(tickers: list[str]) -> dict[str, Quote]:
     }
 
     try:
-        response = SESSION.post(SCAN_URL, json=payload, timeout=DEFAULT_TIMEOUT)
+        response = SESSION.post(
+            SCAN_URL,
+            json=payload,
+            headers=TRADINGVIEW_HEADERS,
+            timeout=DEFAULT_TIMEOUT,
+        )
         response.raise_for_status()
         data = response.json().get("data", [])
     except Exception as exc:
@@ -179,6 +211,9 @@ def get_quotes(tickers: list[str]) -> dict[str, Quote]:
             volume=_as_float(_cell(values, 9)),
             market_cap=_as_float(_cell(values, 10)),
             exchange=_as_str(_cell(values, 11)),
+            day_open=_as_float(_cell(values, 12)),
+            day_low=_as_float(_cell(values, 13)),
+            day_high=_as_float(_cell(values, 14)),
         )
 
     return {
