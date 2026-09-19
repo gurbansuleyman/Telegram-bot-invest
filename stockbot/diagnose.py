@@ -101,6 +101,33 @@ def check_yahoo_crumb() -> bool:
     return True
 
 
+def check_yahoo_rss() -> bool:
+    """Xəbərlərin əsas mənbəyi — crumb tələb etmir."""
+
+    try:
+        response = SESSION.get(
+            yahoo.RSS_URL,
+            params={"s": "AAPL", "region": "US", "lang": "en-US"},
+            headers=YAHOO_HEADERS,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except Exception as exc:
+        _line("Yahoo RSS", False, f"bağlantı alınmadı: {exc}")
+        return False
+
+    if not response.ok:
+        _line("Yahoo RSS", False, f"HTTP {response.status_code} — {_excerpt(response.text)}")
+        return False
+
+    items = yahoo.get_news_rss("AAPL", 3)
+    if not items:
+        _line("Yahoo RSS", False, f"boş axın: {_excerpt(response.text)}")
+        return False
+
+    _line("Yahoo RSS", True, f"{len(items)} xəbər — {_excerpt(items[0].title, 60)}")
+    return True
+
+
 def check_yahoo_news() -> bool:
     try:
         response = SESSION.get(
@@ -146,12 +173,17 @@ def main() -> int:
     results = {
         "TradingView scanner": check_tradingview_scan(),
         "TradingView axtarış": check_tradingview_search(),
+        "Yahoo RSS": check_yahoo_rss(),
         "Yahoo crumb": check_yahoo_crumb(),
-        "Yahoo xəbərlər": check_yahoo_news(),
+        "Yahoo xəbərlər (JSON)": check_yahoo_news(),
         "Yahoo chart": check_yahoo_chart(),
     }
 
     print()
+    # Yalnız RSS və ya JSON-dan biri işləsə, xəbərlər gəlir — ikisi də şərt deyil.
+    news_ok = results["Yahoo RSS"] or results["Yahoo xəbərlər (JSON)"]
+    price_ok = results["TradingView scanner"] or results["Yahoo chart"]
+
     if results["TradingView scanner"]:
         print("Qiymətlər işləyir.")
     elif results["Yahoo chart"]:
@@ -159,10 +191,14 @@ def main() -> int:
     else:
         print("Qiymət mənbəyi yoxdur — /s və /xulase boş qayıdacaq.")
 
-    if not results["Yahoo xəbərlər"]:
+    if results["Yahoo RSS"]:
+        print("Xəbərlər RSS axını ilə işləyir.")
+    elif results["Yahoo xəbərlər (JSON)"]:
+        print("RSS bağlıdır, xəbərlər JSON API ilə gəlir.")
+    else:
         print("Xəbərlər işləmir — /xeber boş qayıdacaq.")
 
-    return 0 if all(results.values()) else 1
+    return 0 if (price_ok and news_ok) else 1
 
 
 if __name__ == "__main__":

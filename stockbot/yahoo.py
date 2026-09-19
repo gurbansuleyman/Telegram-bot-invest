@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 from .http import DEFAULT_TIMEOUT, SESSION, YAHOO_HEADERS
 from .symbols import SymbolMatch
@@ -13,11 +17,16 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
 CHART_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
+RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline"
 COOKIE_URLS = ("https://fc.yahoo.com", "https://finance.yahoo.com")
 CRUMB_URL = "https://query2.finance.yahoo.com/v1/test/getcrumb"
 
 _crumb: str | None = None
 _crumb_tried = False
+
+# 429-dan sonra bir müddət JSON API-yə toxunmuruq: təkrar sorğu limiti uzadır.
+COOLDOWN_SECONDS = 600
+_blocked_until = 0.0
 
 
 def _ensure_crumb() -> str | None:
@@ -58,15 +67,23 @@ def _ensure_crumb() -> str | None:
 
 
 def reset_session() -> None:
-    """Crumb köhnəldikdə yenidən almağa imkan verir."""
+    """Crumb köhnəldikdə (və diaqnostikada) yenidən almağa imkan verir."""
 
-    global _crumb, _crumb_tried
+    global _crumb, _crumb_tried, _blocked_until
     _crumb = None
     _crumb_tried = False
+    _blocked_until = 0.0
 
 
 def _get(url: str, params: dict, what: str) -> dict | None:
     """Yahoo sorğusu: crumb əlavə edir, 429-u ayrıca bildirir."""
+
+    global _blocked_until
+
+    remaining = _blocked_until - time.monotonic()
+    if remaining > 0:
+        log.info("%s ötürüldü: Yahoo limiti daha %d saniyə davam edir", what, remaining)
+        return None
 
     crumb = _ensure_crumb()
     if crumb:
@@ -81,7 +98,12 @@ def _get(url: str, params: dict, what: str) -> dict | None:
         return None
 
     if response.status_code == 429:
-        log.warning("%s: Yahoo limit qoydu (429) — bir azdan yenidən yoxla", what)
+        _blocked_until = time.monotonic() + COOLDOWN_SECONDS
+        log.warning(
+            "%s: Yahoo limit qoydu (429) — %d dəqiqə gözləyirik",
+            what,
+            COOLDOWN_SECONDS // 60,
+        )
         return None
     if response.status_code in (401, 403):
         # Crumb köhnəlib; növbəti sorğuda yenisini alacağıq.
@@ -146,8 +168,64 @@ def search_symbols(text: str, limit: int = 8) -> list[SymbolMatch]:
     return matches
 
 
+def get_news_rss(ticker: str, limit: int = 4) -> list[NewsItem]:
+    """Yahoo-nun RSS axını: crumb və cookie tələb etmir, limitə düşmür."""
+
+    params = {"s": ticker, "region": "US", "lang": "en-US"}
+    try:
+        response = SESSION.get(
+            RSS_URL, params=params, headers=YAHOO_HEADERS, timeout=DEFAULT_TIMEOUT
+        )
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+    except Exception as exc:
+        log.warning("Yahoo RSS alınmadı (%s): %s", ticker, exc)
+        return []
+
+    items: list[NewsItem] = []
+    for node in root.iterfind(".//item"):
+        title = (node.findtext("title") or "").strip()
+        link = (node.findtext("link") or "").strip()
+        if not title or not link:
+            continue
+        items.append(
+            NewsItem(
+                title=title,
+                publisher=(node.findtext("source") or "").strip() or _host(link),
+                link=link,
+                published=_parse_rss_date(node.findtext("pubDate")),
+                tickers=[ticker.upper()],
+            )
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _host(link: str) -> str:
+    return urlparse(link).netloc.replace("www.", "")
+
+
+def _parse_rss_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        moment = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
 def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:
-    """Simvol üzrə Yahoo Finance xəbərləri (ən yenidən köhnəyə)."""
+    """Simvol üzrə Yahoo Finance xəbərləri (ən yenidən köhnəyə).
+
+    Əvvəl RSS sınanır — o, açıqdır və limit qoymur. Boş qayıtsa, JSON
+    axtarış API-si (cookie + crumb tələb edən) ehtiyat kimi işləyir.
+    """
+
+    items = get_news_rss(ticker, limit)
+    if items:
+        return _newest_first(items, limit)
 
     params = {
         "q": ticker,
@@ -176,7 +254,12 @@ def get_news(ticker: str, limit: int = 4) -> list[NewsItem]:
             )
         )
 
-    items.sort(key=lambda item: item.published or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return _newest_first(items, limit)
+
+
+def _newest_first(items: list[NewsItem], limit: int) -> list[NewsItem]:
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    items.sort(key=lambda item: item.published or oldest, reverse=True)
     return items[:limit]
 
 

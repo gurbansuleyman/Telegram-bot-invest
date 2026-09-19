@@ -243,3 +243,55 @@ def test_chat_action_failure_is_swallowed():
     with patch("stockbot.telegram.SESSION") as session:
         session.post.side_effect = RuntimeError("şəbəkə yoxdur")
         client.send_chat_action(42)  # xəta atmamalıdır
+
+
+RSS_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item>
+    <title>Apple beats expectations</title>
+    <link>https://finance.yahoo.com/news/apple-beats.html</link>
+    <pubDate>Fri, 19 Sep 2026 10:30:00 +0000</pubDate>
+    <source>Reuters</source>
+  </item>
+  <item>
+    <title>Analysts raise price target</title>
+    <link>https://www.marketwatch.com/story/aapl-target</link>
+    <pubDate>Fri, 19 Sep 2026 08:00:00 +0000</pubDate>
+  </item>
+</channel></rss>"""
+
+
+def test_rss_news_parsed_newest_first():
+    from stockbot import yahoo
+
+    response = MagicMock(content=RSS_SAMPLE)
+    response.raise_for_status.return_value = None
+    with patch("stockbot.yahoo.SESSION") as session:
+        session.get.return_value = response
+        items = yahoo.get_news_rss("AAPL", 5)
+
+    assert [item.title for item in items] == [
+        "Apple beats expectations",
+        "Analysts raise price target",
+    ]
+    assert items[0].publisher == "Reuters"
+    # <source> yoxdursa, link-in domeni istifadə olunur.
+    assert items[1].publisher == "marketwatch.com"
+    assert items[0].published.year == 2026
+
+
+def test_yahoo_cooldown_skips_requests_after_429():
+    from stockbot import yahoo
+
+    yahoo.reset_session()
+    with patch("stockbot.yahoo.SESSION") as session, \
+         patch("stockbot.yahoo._ensure_crumb", return_value=None):
+        session.get.return_value = MagicMock(status_code=429, text="Too Many Requests")
+        assert yahoo._get("https://x", {}, "sınaq") is None
+        calls_after_first = session.get.call_count
+
+        # Soyuma müddətində ikinci sorğu ümumiyyətlə göndərilmir.
+        assert yahoo._get("https://x", {}, "sınaq") is None
+        assert session.get.call_count == calls_after_first
+
+    yahoo.reset_session()
