@@ -129,9 +129,13 @@ tests/            şəbəkəsiz vahid testlər (pytest)
 
 ## 24/7 işlətmək
 
-macOS-da, pulsuz: `./deploy/install-macos.sh` — launchd xidməti qurur, Mac
-açılanda bot özü işə düşür. Server variantı (systemd/Docker) və bütün
-təfərrüatlar: [DEPLOY.md](DEPLOY.md).
+| Harada | Komanda | Nə vaxt işləyir |
+| --- | --- | --- |
+| macOS | `./deploy/install-macos.sh` | Mac açıq olduqca (launchd) |
+| Linux server | `sudo ./deploy/install-linux.sh` | Həmişə (systemd) |
+| Docker | `docker run -d --restart unless-stopped …` | Həmişə |
+
+Pulsuz 24/7 üçün Oracle Cloud Always Free — addım-addım: [DEPLOY.md](DEPLOY.md).
 
 ## Branch modeli
 
