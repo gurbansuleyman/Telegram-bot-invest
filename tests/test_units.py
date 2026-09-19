@@ -517,3 +517,40 @@ def test_chart_uses_the_live_price_as_its_last_point():
     assert replaced[-1].close == 111.5
 
     assert _with_live_price(history, None) == history
+
+
+def test_history_falls_back_to_yahoo_when_stooq_returns_html():
+    """Stooq anti-bot səhifəsi qaytaranda Yahoo tarixçəsinə keçilməlidir."""
+
+    from datetime import timezone
+
+    from stockbot import history
+
+    history._cache.clear()
+    html = MagicMock(text="<!DOCTYPE html><html><head>")
+    html.raise_for_status.return_value = None
+    stamp = int(datetime(2026, 9, 18, tzinfo=timezone.utc).timestamp())
+
+    with patch("stockbot.history.SESSION") as session, \
+         patch("stockbot.yahoo.daily_closes", return_value=[(stamp, 336.13)]) as fallback:
+        session.get.return_value = html
+        candles = history.daily_closes("AAPL", "NASDAQ")
+
+    # Hər iki Stooq domeni sınanmalı, sonra Yahoo.
+    assert session.get.call_count == len(history.STOOQ_URLS)
+    assert fallback.called
+    assert [c.close for c in candles] == [336.13]
+    history._cache.clear()
+
+
+def test_remote_image_rejects_non_png():
+    from stockbot import chart
+
+    with patch("stockbot.chart.SESSION") as session:
+        session.get.return_value = MagicMock(content=b"<html>error</html>")
+        session.get.return_value.raise_for_status.return_value = None
+        assert chart.remote_image("AAPL") is None
+
+        session.get.return_value = MagicMock(content=b"\x89PNG\r\n\x1a\n rest")
+        session.get.return_value.raise_for_status.return_value = None
+        assert chart.remote_image("AAPL") is not None

@@ -215,6 +215,31 @@ def check_yahoo_chart() -> bool:
     return True
 
 
+def check_history_variants() -> None:
+    """Stooq CSV yerinə HTML qaytaranda səbəbi ayırd etmək üçün."""
+
+    print("   Tarixçə mənbələri:")
+    for url in history.STOOQ_URLS:
+        try:
+            response = requests.get(
+                url,
+                params={"s": "aapl.us", "i": "d"},
+                headers={**SESSION.headers, **history.STOOQ_HEADERS},
+                timeout=DEFAULT_TIMEOUT,
+            )
+            head = _excerpt(response.text, 50)
+            kind = "CSV" if response.text.startswith("Date,") else "CSV DEYİL"
+            print(f"     • {url}: HTTP {response.status_code} — {kind} — {head}")
+        except Exception as exc:
+            print(f"     • {url}: bağlantı alınmadı ({type(exc).__name__})")
+
+    pairs = yahoo.daily_closes("AAPL")
+    print(f"     • Yahoo chart tarixçəsi: {len(pairs)} gün")
+
+    png = chart.remote_image("AAPL")
+    print(f"     • Finviz hazır şəkil: {'PNG alındı' if png else 'alınmadı'}")
+
+
 def check_history() -> bool:
     """Qrafiklər üçün günlük tarixçə (Stooq)."""
 
@@ -261,6 +286,8 @@ def main() -> int:
 
     if not results["Yahoo RSS"]:
         check_yahoo_header_variants()
+    if not results["Stooq tarixçəsi"]:
+        check_history_variants()
 
     chart_ok = results["Stooq tarixçəsi"] and results["Qrafik (matplotlib)"]
 

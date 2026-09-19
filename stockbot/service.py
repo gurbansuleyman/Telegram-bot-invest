@@ -162,7 +162,10 @@ def quote_card(query: str, exchange: str | None = None) -> tuple[str, bytes | No
 
     candles = history.daily_closes(entry.ticker, exchange)
     price = entry.quote.price if entry.quote else entry.snapshot.price
-    return text, chart.render(entry.ticker, name, candles, change, currency, price)
+    png = chart.render(entry.ticker, name, candles, change, currency, price)
+    if png is None:
+        png = chart.remote_image(entry.ticker)
+    return text, png
 
 
 def quotes_report(queries: list[str]) -> str:

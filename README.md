@@ -99,7 +99,9 @@ yaz → `DIGEST_TIME=07:30` (UTC; Bakı vaxtı ilə 11:30) → botu yenidən ba�
 - **Yahoo Finance chart** (`.../v8/finance/chart/...`) — TradingView cavab
   vermədikdə ehtiyat qiymət mənbəyi; 1 həftə ≈ 5 ticarət günü kimi hesablanır.
 - **Google News RSS** — Yahoo bağlı olanda xəbərlər buradan gəlir.
-- **Stooq** (`stooq.com/q/d/l/`) — qrafik üçün günlük bağlanış qiymətləri.
+- **Stooq** (`stooq.com` və `stooq.pl`) — qrafik üçün günlük bağlanış qiymətləri.
+- **Finviz** (`charts2.finviz.com`) — heç bir tarixçə mənbəyi cavab verməyəndə
+  hazır qrafik şəkli.
 
 Hər iki xidmət rəsmi/açıq API deyil, sənədləşdirilməmiş endpoint-lərdir:
 sorğular təkrar cəhdlə (retry) göndərilir, biri cavab verməsə bot digərinə keçir,
