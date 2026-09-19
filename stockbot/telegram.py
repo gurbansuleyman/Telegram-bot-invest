@@ -14,7 +14,11 @@ MAX_MESSAGE_LEN = 4096
 
 
 class TelegramError(RuntimeError):
-    pass
+    """Telegram sorğusunun alınmaması. `kind` səbəbi ayırd etməyə imkan verir."""
+
+    def __init__(self, message: str, kind: str = "api") -> None:
+        super().__init__(message)
+        self.kind = kind  # "auth" | "network" | "api"
 
 
 class TelegramClient:
@@ -23,16 +27,25 @@ class TelegramClient:
         self._poll_timeout = poll_timeout
         self._offset: int | None = None
 
+    def _redact(self, text: str) -> str:
+        """Token URL-in içindədir — xəta mətnində və logda görünməməlidir."""
+
+        return text.replace(self._token, "***") if self._token else text
+
     def _call(self, method: str, timeout: int, **payload):
         url = API_URL.format(token=self._token, method=method)
         try:
             response = SESSION.post(url, json=payload, timeout=timeout)
             body = response.json()
         except Exception as exc:
-            raise TelegramError(f"{method} sorğusu alınmadı: {exc}") from exc
+            raise TelegramError(
+                self._redact(f"{method} sorğusu alınmadı: {exc}"), kind="network"
+            ) from exc
 
         if not body.get("ok"):
-            raise TelegramError(f"{method} xətası: {body.get('description')}")
+            kind = "auth" if body.get("error_code") in (401, 404) else "api"
+            message = self._redact(f"{method} xətası: {body.get('description')}")
+            raise TelegramError(message, kind=kind)
         return body.get("result")
 
     def get_me(self) -> dict:

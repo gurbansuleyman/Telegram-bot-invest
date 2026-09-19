@@ -147,3 +147,40 @@ def test_config_from_env():
 
 def test_seconds_until_is_within_a_day():
     assert 0 < _seconds_until("00:01") <= 24 * 3600
+
+
+def test_telegram_error_redacts_token():
+    from stockbot.telegram import TelegramClient
+
+    client = TelegramClient("8123456789:SECRET-TOKEN")
+    message = client._redact(
+        "getMe sorğusu alınmadı: url /bot8123456789:SECRET-TOKEN/getMe"
+    )
+    assert "SECRET-TOKEN" not in message
+    assert "***" in message
+
+
+def test_startup_hint_by_kind():
+    from stockbot.__main__ import _startup_hint
+    from stockbot.telegram import TelegramError
+
+    auth = _startup_hint(TelegramError("getMe xətası: Unauthorized", kind="auth"))
+    assert "TELEGRAM_BOT_TOKEN" in auth and "BotFather" in auth
+
+    network = _startup_hint(TelegramError("bağlantı yoxdur", kind="network"))
+    assert "api.telegram.org" in network
+
+
+def test_log_filter_redacts_token():
+    import logging
+
+    from stockbot.__main__ import TokenRedactor
+
+    redactor = TokenRedactor("8123456789:SECRET")
+    record = logging.LogRecord(
+        "urllib3", logging.WARNING, __file__, 1,
+        "Retrying after %s", ("/bot8123456789:SECRET/getMe",), None,
+    )
+    redactor.filter(record)
+    assert "SECRET" not in record.getMessage()
+    assert "***" in record.getMessage()
