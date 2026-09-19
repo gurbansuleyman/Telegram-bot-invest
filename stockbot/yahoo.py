@@ -76,14 +76,25 @@ def reset_session() -> None:
     _blocked_until = 0.0
 
 
+def _cooling_down(what: str) -> bool:
+    """429-dan sonra Yahoo-nu tamamilə buraxırıq — çağıran başqa mənbəyə keçir."""
+
+    remaining = _blocked_until - time.monotonic()
+    if remaining <= 0:
+        return False
+    log.info("%s ötürüldü: Yahoo limiti daha %d saniyə davam edir", what, remaining)
+    return True
+
+
+def _start_cooldown() -> None:
+    global _blocked_until
+    _blocked_until = time.monotonic() + COOLDOWN_SECONDS
+
+
 def _get(url: str, params: dict, what: str) -> dict | None:
     """Yahoo sorğusu: crumb əlavə edir, 429-u ayrıca bildirir."""
 
-    global _blocked_until
-
-    remaining = _blocked_until - time.monotonic()
-    if remaining > 0:
-        log.info("%s ötürüldü: Yahoo limiti daha %d saniyə davam edir", what, remaining)
+    if _cooling_down(what):
         return None
 
     crumb = _ensure_crumb()
@@ -99,7 +110,7 @@ def _get(url: str, params: dict, what: str) -> dict | None:
         return None
 
     if response.status_code == 429:
-        _blocked_until = time.monotonic() + COOLDOWN_SECONDS
+        _start_cooldown()
         log.warning(
             "%s: Yahoo limit qoydu (429) — %d dəqiqə gözləyirik",
             what,
@@ -167,14 +178,32 @@ def get_news_rss(ticker: str, limit: int = 4) -> list[NewsItem]:
     başqa mənbəyə keçir.
     """
 
+    what = f"Yahoo RSS ({ticker})"
+    if _cooling_down(what):
+        return []
+
     params = {"s": ticker, "region": "US", "lang": "en-US"}
     try:
         response = SESSION.get(
             RSS_URL, params=params, headers=YAHOO_HEADERS, timeout=DEFAULT_TIMEOUT
         )
-        response.raise_for_status()
     except Exception as exc:
-        log.warning("Yahoo RSS alınmadı (%s): %s", ticker, exc)
+        log.warning("%s alınmadı: %s", what, exc)
+        return []
+
+    if response.status_code in (404, 429):
+        # Bu IP üçün Yahoo bağlıdır; növbəti sorğularda vaxt itirməyək.
+        _start_cooldown()
+        log.warning(
+            "%s: HTTP %s — %d dəqiqə Yahoo-ya toxunmuruq",
+            what,
+            response.status_code,
+            COOLDOWN_SECONDS // 60,
+        )
+        return []
+
+    if not response.ok:
+        log.warning("%s: HTTP %s", what, response.status_code)
         return []
 
     return parse_rss(response.content, ticker, limit)

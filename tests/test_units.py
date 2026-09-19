@@ -335,3 +335,20 @@ def test_get_news_falls_back_when_yahoo_is_empty():
     assert items == [google_item]
     assert rss.called and google.called
     assert not json_api.called  # Google cavab verdi, JSON-a ehtiyac qalmadı
+
+
+def test_yahoo_rss_cooldown_skips_next_call():
+    """429-dan sonra RSS də ötürülməlidir ki, hər sorğuda vaxt itməsin."""
+
+    from stockbot import yahoo
+
+    yahoo.reset_session()
+    with patch("stockbot.yahoo.SESSION") as session:
+        session.get.return_value = MagicMock(status_code=429, ok=False)
+        assert yahoo.get_news_rss("AAPL", 3) == []
+        assert session.get.call_count == 1
+
+        assert yahoo.get_news_rss("MSFT", 3) == []
+        assert session.get.call_count == 1  # ikinci sorğu göndərilmədi
+
+    yahoo.reset_session()
