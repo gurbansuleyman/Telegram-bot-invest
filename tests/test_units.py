@@ -554,3 +554,30 @@ def test_remote_image_rejects_non_png():
         session.get.return_value = MagicMock(content=b"\x89PNG\r\n\x1a\n rest")
         session.get.return_value.raise_for_status.return_value = None
         assert chart.remote_image("AAPL") is not None
+
+
+def test_diagnose_counts_finviz_as_a_working_chart():
+    """Tarixçə olmasa da Finviz şəkil verirsə, 'qrafik yoxdur' demək yanlışdır."""
+
+    from stockbot import diagnose
+
+    printed: list[str] = []
+    with patch("stockbot.diagnose.check_tradingview_scan", return_value=True), \
+         patch("stockbot.diagnose.check_tradingview_search", return_value=True), \
+         patch("stockbot.diagnose.check_yahoo_rss", return_value=False), \
+         patch("stockbot.diagnose.check_google_news", return_value=True), \
+         patch("stockbot.diagnose.check_yahoo_crumb", return_value=False), \
+         patch("stockbot.diagnose.check_yahoo_news", return_value=False), \
+         patch("stockbot.diagnose.check_yahoo_chart", return_value=False), \
+         patch("stockbot.diagnose.check_history", return_value=False), \
+         patch("stockbot.diagnose.check_renderer", return_value=True), \
+         patch("stockbot.diagnose.check_finviz", return_value=True), \
+         patch("stockbot.diagnose.check_yahoo_header_variants"), \
+         patch("stockbot.diagnose.check_history_variants"), \
+         patch("builtins.print", side_effect=lambda *a, **k: printed.append(" ".join(map(str, a)))):
+        code = diagnose.main()
+
+    report = "\n".join(printed)
+    assert "Finviz-in hazır şəklindən" in report
+    assert "Qrafik göndərilməyəcək" not in report
+    assert code == 0  # qiymət + xəbər işləyir

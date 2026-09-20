@@ -256,15 +256,33 @@ def check_history() -> bool:
     return True
 
 
-def check_chart() -> bool:
-    """matplotlib quraşdırılıbmı — şəkil çəkilə bilirmi?"""
+def check_renderer() -> bool:
+    """matplotlib özü işləyirmi — tarixçədən asılı olmayan yoxlama."""
 
-    candles = history.daily_closes("AAPL", "NASDAQ")
-    png = chart.render("AAPL", "Apple Inc.", candles, 1.0, "USD")
+    from datetime import date, timedelta
+
+    from .history import Candle
+
+    sample = [
+        Candle(day=date(2026, 1, 1) + timedelta(days=i), close=100 + i)
+        for i in range(10)
+    ]
+    png = chart.render("TEST", "Sınaq", sample, 1.0, "USD")
     if not png:
-        _line("Qrafik (matplotlib)", False, "çəkilmədi — bot yalnız mətn göndərəcək")
+        _line("matplotlib", False, "quraşdırılmayıb: pip install -r requirements.txt")
         return False
-    _line("Qrafik (matplotlib)", True, f"PNG hazırlandı ({len(png) // 1024} KB)")
+    _line("matplotlib", True, f"öz qrafikimizi çəkir ({len(png) // 1024} KB)")
+    return True
+
+
+def check_finviz() -> bool:
+    """Tarixçə olmayanda göndərilən hazır qrafik şəkli."""
+
+    png = chart.remote_image("AAPL")
+    if not png:
+        _line("Finviz qrafiki", False, "alınmadı")
+        return False
+    _line("Finviz qrafiki", True, f"hazır şəkil gəlir ({len(png) // 1024} KB)")
     return True
 
 
@@ -281,7 +299,8 @@ def main() -> int:
         "Yahoo xəbərlər (JSON)": check_yahoo_news(),
         "Yahoo chart": check_yahoo_chart(),
         "Stooq tarixçəsi": check_history(),
-        "Qrafik (matplotlib)": check_chart(),
+        "matplotlib": check_renderer(),
+        "Finviz qrafiki": check_finviz(),
     }
 
     if not results["Yahoo RSS"]:
@@ -289,7 +308,9 @@ def main() -> int:
     if not results["Stooq tarixçəsi"]:
         check_history_variants()
 
-    chart_ok = results["Stooq tarixçəsi"] and results["Qrafik (matplotlib)"]
+    # Öz qrafikimiz tarixçə + matplotlib tələb edir; Finviz isə müstəqil yoldur.
+    own_chart = results["Stooq tarixçəsi"] and results["matplotlib"]
+    chart_ok = own_chart or results["Finviz qrafiki"]
 
     print()
     # Yalnız RSS və ya JSON-dan biri işləsə, xəbərlər gəlir — ikisi də şərt deyil.
@@ -316,7 +337,11 @@ def main() -> int:
     else:
         print("Xəbərlər işləmir — /xeber boş qayıdacaq.")
 
-    if not chart_ok:
+    if own_chart:
+        print("Qrafiklər öz palitramızda çəkilir.")
+    elif chart_ok:
+        print("Tarixçə mənbəyi yoxdur — qrafiklər Finviz-in hazır şəklindən gəlir.")
+    else:
         print("Qrafik göndərilməyəcək — /izle və /s yalnız mətn qaytaracaq.")
 
     return 0 if (price_ok and news_ok) else 1
